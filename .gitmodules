@@ -9,3 +9,6 @@
 [submodule "guild-service"]
 	path = guild-service
 	url = https://github.com/MaxKostov/guild-service.git
+[submodule "pad-monster-raid-service"]
+	path = pad-monster-raid-service
+	url = https://github.com/aXeeDENt/pad-monster-raid-service.git

@@ -44,7 +44,7 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 ## Architecture Diagram
 
-_To be added._ Source: [`application_diagram.drawio`](./application_diagram.drawio)
+![Architecture Diagram](./src/application_diagram.png)
 
 **How the services communicate:**
 

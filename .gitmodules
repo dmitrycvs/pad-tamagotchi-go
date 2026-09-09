@@ -1,0 +1,3 @@
+[submodule "pad-map-service"]
+	path = pad-map-service
+	url = https://github.com/aXeeDENt/pad-map-service.git

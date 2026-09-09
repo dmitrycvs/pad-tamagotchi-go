@@ -1,0 +1,3 @@
+[submodule "guild-service"]
+	path = guild-service
+	url = https://github.com/MaxKostov/guild-service.git

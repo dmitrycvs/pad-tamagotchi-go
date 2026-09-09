@@ -1,0 +1,3 @@
+[submodule "package-registry"]
+	path = package-registry
+	url = https://github.com/MaxKostov/package-registry-service.git

@@ -12,3 +12,9 @@
 [submodule "pad-monster-raid-service"]
 	path = pad-monster-raid-service
 	url = https://github.com/aXeeDENt/pad-monster-raid-service.git
+[submodule "tamagotchi-service"]
+	path = tamagotchi-service
+	url = https://github.com/dmitrycvs/tamagotchi-service.git
+[submodule "notification-service"]
+	path = notification-service
+	url = https://github.com/dmitrycvs/notification-service.git

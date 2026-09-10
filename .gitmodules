@@ -18,3 +18,9 @@
 [submodule "notification-service"]
 	path = notification-service
 	url = https://github.com/dmitrycvs/notification-service.git
+[submodule "battle-service"]
+	path = battle-service
+	url = https://github.com/filipel2004/battle-service.git
+[submodule "user-management-service"]
+	path = user-management-service
+	url = https://github.com/filipel2004/user-management-service.git

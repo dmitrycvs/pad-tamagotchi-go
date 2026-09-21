@@ -1372,6 +1372,61 @@ Headers: `Authorization: Bearer <jwt>` (requires `admin` role)
 
 ---
 
+## Running the System
+
+### Requirements
+
+- **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
+- Roughly **4 GB** of free RAM — nine containers, eight services plus PostgreSQL
+- Ports **5432** and **8081–8088** free on the host
+- No language toolchains needed: every service runs from a published image
+
+### Setup
+
+```bash
+git clone https://github.com/dmitrycvs/pad-tamagotchi-go.git
+cd pad-tamagotchi-go
+cp .env.example .env     # then fill in the values
+docker compose up -d
+```
+
+`.env` is gitignored and holds every credential — database password, JWT secrets,
+Firebase service-account JSON. Nothing in this repository contains real secrets;
+`.env.example` documents the shape only.
+
+The database is a single **PostGIS-enabled PostgreSQL 16** instance. Each service
+owns a separate logical database inside it, created on first boot by
+[`db/init/01-create-databases.sql`](./db/init/01-create-databases.sql). Data
+persists in the named volume `postgres-data`, so `docker compose down` keeps it
+and `docker compose down -v` discards it.
+
+### Service Images
+
+Every service is published to DockerHub as a public image, tagged with its
+version. The DockerHub namespace per owner is set in `.env`.
+
+| Service | Image | Host port |
+|---|---|---|
+| User Management | `<filip>/user-management-service:1.0.0` | 8081 |
+| Battle | `<filip>/battle-service:1.0.0` | 8082 |
+| Tamagotchi | `dmitrycvs/tamagotchi-service:1.0.0` | 8083 |
+| Notification | `dmitrycvs/notification-service:1.0.0` | 8084 |
+| Map | `<denis>/pad-map-service:1.0.0` | 8085 |
+| Monster Raid | `<denis>/pad-monster-raid-service:1.0.0` | 8086 |
+| Guild | `<maxim>/guild-service:1.0.0` | 8087 |
+| Package Registry | `<maxim>/package-registry-service:1.0.0` | 8088 |
+
+Services reach each other over the compose network by service name on port 8080
+(e.g. `http://tamagotchi-service:8080`); the host ports above are for testing
+from outside the stack.
+
+### Testing
+
+Postman collections for every service live in [`postman/`](./postman). Point a
+collection's `base_url` at the matching host port above.
+
+---
+
 ## GitHub Workflow
 
 ### Branch Structure

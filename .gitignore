@@ -1,1 +1,5 @@
-PAD_LAB_0_2026.pdf
+*.pdf
+
+.env
+.env.local
+

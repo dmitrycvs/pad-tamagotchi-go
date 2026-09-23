@@ -42,6 +42,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/battle
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
@@ -59,6 +60,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
       PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
@@ -75,6 +77,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
       FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON}
@@ -90,6 +93,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/map
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
       NOTIFICATION_SERVICE_URL: http://notification-service:8080
@@ -106,6 +110,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/monster_raid
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GUILD_SERVICE_URL: http://guild-service:8080
       TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
@@ -123,6 +128,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
       NOTIFICATION_SERVICE_URL: http://notification-service:8080
@@ -138,6 +144,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
+      JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
       TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080

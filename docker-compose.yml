@@ -21,7 +21,8 @@ services:
       retries: 10
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP}/user-management-service:${TAG_USER_MANAGEMENT:-1.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
@@ -30,12 +31,14 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/user_management
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      NOTIFICATION_SERVICE_URL: http://notification-service:8080
       PORT: 8080
     ports:
       - "8081:8080"
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP}/battle-service:${TAG_BATTLE:-1.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
@@ -53,7 +56,8 @@ services:
       - "8082:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII}/tamagotchi-service:${TAG_TAMAGOTCHI:-1.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
@@ -70,7 +74,8 @@ services:
       - "8083:8080"
 
   notification-service:
-    image: ${DOCKERHUB_USER_DMITRII}/notification-service:${TAG_NOTIFICATION:-1.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
@@ -86,13 +91,14 @@ services:
       - "8084:8080"
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS}/pad-map-service:${TAG_MAP:-1.0.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/map
+      DATABASE_URL: Host=postgres;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
@@ -103,13 +109,14 @@ services:
       - "8085:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS}/pad-monster-raid-service:${TAG_MONSTER_RAID:-1.0.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/monster_raid
+      DATABASE_URL: Host=postgres;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GUILD_SERVICE_URL: http://guild-service:8080
@@ -121,7 +128,8 @@ services:
       - "8086:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM}/guild-service:${TAG_GUILD:-1.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
@@ -137,7 +145,8 @@ services:
       - "8087:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM}/package-registry-service:${TAG_PACKAGE_REGISTRY:-1.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-1.0.0}
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:

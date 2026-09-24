@@ -1,0 +1,14 @@
+# Use this workspace to collaborate
+workspace:
+  id: ""
+
+localResources:
+  collections:
+    - ../battle-service.postman_collection.json
+    - ../guild-service.postman_collection.json
+    - ../map-service.postman_collection.json
+    - ../monster-raid-service.postman_collection.json
+    - ../notification-service.postman_collection.json
+    - ../package-registry-service.postman_collection.json
+    - ../tamagotchi-service.postman_collection.json
+    - ../user-management-service.postman_collection.json

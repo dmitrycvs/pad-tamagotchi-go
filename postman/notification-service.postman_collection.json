@@ -126,7 +126,31 @@
       ]
     }
   ],
+  "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": [
+      "// Generates the JWTs this collection needs, signed with the stack secrets.",
+      "// Set jwt_secret / service_jwt_secret to the values in your .env.",
+      "const TOKENS = {\"jwt\":{\"sub\":\"user_id\"},\"service_jwt\":{\"service\":true}};",
+      "const DEFAULT_PACKAGE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';",
+      "const v = (k) => pm.variables.get(k) || \"\";",
+      "const b64url = (w) => CryptoJS.enc.Base64.stringify(w).split(\"=\").join(\"\").split(\"+\").join(\"-\").split(\"/\").join(\"_\");",
+      "const enc = (o) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(o)));",
+      "const sign = (claims, secret) => {",
+      "  const body = enc({ alg: \"HS256\", typ: \"JWT\" }) + \".\" + enc(claims);",
+      "  return body + \".\" + b64url(CryptoJS.HmacSHA256(body, secret));",
+      "};",
+      "const now = Math.floor(Date.now() / 1000);",
+      "Object.entries(TOKENS).forEach(([name, t]) => {",
+      "  const claims = t.service",
+      "    ? { sub: \"postman\", roles: [\"service\"] }",
+      "    : { sub: t.subValue || v(t.sub), package_id: v(\"package_id\") || DEFAULT_PACKAGE, roles: t.roles || [\"user\"] };",
+      "  claims.iat = now;",
+      "  claims.exp = now + 3600;",
+      "  pm.collectionVariables.set(name, sign(claims, v(t.service ? \"service_jwt_secret\" : \"jwt_secret\")));",
+      "});"
+    ] } }],
   "variable": [
+    { "key": "jwt_secret", "value": "change_me_to_a_secret_with_at_least_32_characters", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
+    { "key": "service_jwt_secret", "value": "change_me_to_a_service_secret_at_least_32_chars", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },
     { "key": "base_url", "value": "http://localhost:8084", "type": "string" },
     { "key": "jwt", "value": "", "type": "string", "description": "JWT for user_id; keep empty in the exported collection." },
     { "key": "service_jwt", "value": "", "type": "string", "description": "Keep empty in the exported collection." },

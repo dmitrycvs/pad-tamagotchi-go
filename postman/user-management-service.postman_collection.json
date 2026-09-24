@@ -1,0 +1,260 @@
+{
+  "info": {
+    "_postman_id": "08dfb88f-6892-4c38-997a-e5ab54637619",
+    "name": "Tamagotchi Go — User Management Service",
+    "description": "User Management Service collection based on the shared Communication Contract. Run requests in order. Register generates unique credentials; Login stores jwt for later user requests. Keep service_jwt and other_user_jwt only in a local environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register a User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const suffix = Date.now().toString();",
+                  "pm.collectionVariables.set(\"username\", \"postman_\" + suffix);",
+                  "pm.collectionVariables.set(\"email\", \"postman_\" + suffix + \"@example.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201 Created\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.user_id).to.be.a(\"string\").and.not.empty;",
+                  "pm.collectionVariables.set(\"user_id\", body.user_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"package_id\": \"{{package_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/users/register", "host": ["{{base_url}}"], "path": ["api", "users", "register"] }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"user_id\": \"11111111-1111-4111-8111-111111111111\",\n  \"username\": \"postman_user\",\n  \"packages\": [\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"],\n  \"global_currency\": 0\n}"
+            },
+            {
+              "name": "409 Username or email already registered",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"error\": \"Username or email already registered.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.jwt).to.be.a(\"string\").and.not.empty;",
+                  "pm.collectionVariables.set(\"jwt\", body.jwt);",
+                  "if (body.user_id) pm.collectionVariables.set(\"user_id\", body.user_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/users/login", "host": ["{{base_url}}"], "path": ["api", "users", "login"] }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"jwt\": \"<jwt_token>\",\n  \"user_id\": \"11111111-1111-4111-8111-111111111111\",\n  \"roles\": [\"user\"],\n  \"expires_in\": 3600\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Profiles and Relationships",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().user_id).to.eql(pm.collectionVariables.get(\"user_id\"));"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{jwt}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}"] }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"user_id\": \"11111111-1111-4111-8111-111111111111\",\n  \"username\": \"postman_user\",\n  \"packages\": [\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"],\n  \"global_currency\": 0,\n  \"created_at\": \"2026-09-24T12:00:00Z\"\n}"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"error\": \"Unauthorized.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Relationship Between Users",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));", "pm.expect([\"friend\", \"enemy\", \"none\"]).to.include(pm.response.json().relation);"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{service_jwt}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/relationship/{{other_user_id}}", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "relationship", "{{other_user_id}}"] },
+            "description": "Internal endpoint; requires a service JWT."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"user_id\": \"11111111-1111-4111-8111-111111111111\",\n  \"other_user_id\": \"22222222-2222-4222-8222-222222222222\",\n  \"relation\": \"none\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Friends",
+      "item": [
+        {
+          "name": "Send Friend Request",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 202 Accepted\", () => pm.response.to.have.status(202));", "const body = pm.response.json();", "pm.collectionVariables.set(\"request_id\", body.request_id);"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{jwt}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"target_user_id\": \"{{other_user_id}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/friends", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "friends"] }
+          },
+          "response": [
+            {
+              "name": "202 Accepted",
+              "status": "Accepted",
+              "code": 202,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "cookie": [],
+              "body": "{\n  \"request_id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n  \"status\": \"pending\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Respond to Friend Request",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is successful\", () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{other_user_jwt}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"action\": \"accept\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/users/{{other_user_id}}/friends/{{request_id}}", "host": ["{{base_url}}"], "path": ["api", "users", "{{other_user_id}}", "friends", "{{request_id}}"] },
+            "description": "Use the target user's JWT to accept, decline, or block the incoming request."
+          },
+          "response": [{ "name": "200 Accepted", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"status\": \"accepted\"\n}" }]
+        },
+        {
+          "name": "List Friends and Enemies",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));", "const body = pm.response.json();", "pm.expect(body.friends).to.be.an(\"array\");", "pm.expect(body.enemies).to.be.an(\"array\");"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{jwt}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/friends", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "friends"] }
+          },
+          "response": [{ "name": "200 OK", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"friends\": [\n    { \"user_id\": \"22222222-2222-4222-8222-222222222222\", \"username\": \"friend\", \"status\": \"online\" }\n  ],\n  \"enemies\": []\n}" }]
+        }
+      ]
+    },
+    {
+      "name": "Currency",
+      "item": [
+        {
+          "name": "Get Currency Balances",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));", "pm.expect(pm.response.json()).to.have.property(\"global_currency\");"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{jwt}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/currency", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "currency"] }
+          },
+          "response": [{ "name": "200 OK", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"user_id\": \"11111111-1111-4111-8111-111111111111\",\n  \"global_currency\": 0,\n  \"local_currency\": []\n}" }]
+        },
+        {
+          "name": "Adjust Currency",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));", "pm.expect(pm.response.json()).to.have.property(\"balance\");"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{service_jwt}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"event_id\": \"{{$guid}}\",\n  \"currency\": \"global\",\n  \"amount\": 120,\n  \"reason\": \"battle_won\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/currency", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "currency"] },
+            "description": "Internal idempotent endpoint; requires a service JWT."
+          },
+          "response": [
+            { "name": "200 OK", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"user_id\": \"11111111-1111-4111-8111-111111111111\",\n  \"currency\": \"global\",\n  \"balance\": 120\n}" },
+            { "name": "409 Insufficient global currency", "status": "Conflict", "code": 409, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"error\": \"Insufficient global currency.\"\n}" }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8081", "type": "string" },
+    { "key": "jwt", "value": "", "type": "string", "description": "Filled by Login; do not commit a real token." },
+    { "key": "service_jwt", "value": "", "type": "string", "description": "Set only in a local environment." },
+    { "key": "other_user_jwt", "value": "", "type": "string", "description": "JWT for other_user_id; set only in a local environment." },
+    { "key": "username", "value": "", "type": "string", "description": "Generated by Register a User." },
+    { "key": "email", "value": "", "type": "string", "description": "Generated by Register a User." },
+    { "key": "password", "value": "PostmanTest123!", "type": "string", "description": "Non-production local test password." },
+    { "key": "package_id", "value": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "type": "string" },
+    { "key": "user_id", "value": "", "type": "string", "description": "Filled by Register or Login." },
+    { "key": "other_user_id", "value": "22222222-2222-4222-8222-222222222222", "type": "string" },
+    { "key": "request_id", "value": "", "type": "string", "description": "Filled by Send Friend Request." }
+  ]
+}

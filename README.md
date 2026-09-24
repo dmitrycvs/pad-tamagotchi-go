@@ -1407,14 +1407,14 @@ version. The DockerHub namespace per owner is set in `.env`.
 
 | Service | Image | Host port |
 |---|---|---|
-| User Management | `<filip>/user-management-service:1.0.0` | 8081 |
-| Battle | `<filip>/battle-service:1.0.0` | 8082 |
+| User Management | `filipel2004/user-management-service:1.0.0` | 8081 |
+| Battle | `filipel2004/battle-service:1.0.0` | 8082 |
 | Tamagotchi | `dmitrycvs/tamagotchi-service:1.0.0` | 8083 |
 | Notification | `dmitrycvs/notification-service:1.0.0` | 8084 |
-| Map | `<denis>/pad-map-service:1.0.0` | 8085 |
-| Monster Raid | `<denis>/pad-monster-raid-service:1.0.0` | 8086 |
-| Guild | `<maxim>/guild-service:1.0.0` | 8087 |
-| Package Registry | `<maxim>/package-registry-service:1.0.0` | 8088 |
+| Map | `takima/pad-map-service:1.0.0` | 8085 |
+| Monster Raid | `takima/pad-monster-raid-service:1.0.0` | 8086 |
+| Guild | `maxkostov/guild-service:1.0.0` | 8087 |
+| Package Registry | `maxkostov/package-registry-service:1.0.0` | 8088 |
 
 Services reach each other over the compose network by service name on port 8080
 (e.g. `http://tamagotchi-service:8080`); the host ports above are for testing

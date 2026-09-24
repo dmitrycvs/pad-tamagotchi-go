@@ -1372,7 +1372,7 @@ Headers: `Authorization: Bearer <jwt>` (requires `admin` role)
 
 ---
 
-## Running the System
+## Running the Services
 
 ### Requirements
 
@@ -1419,6 +1419,31 @@ version. The DockerHub namespace per owner is set in `.env`.
 Services reach each other over the compose network by service name on port 8080
 (e.g. `http://tamagotchi-service:8080`); the host ports above are for testing
 from outside the stack.
+
+### Guild and Package Registry Services
+
+| Service | Host port | Container port | Database |
+| --- | ---: | ---: | --- |
+| Guild Service | 8087 | 8080 | guild |
+| Package Registry Service | 8088 | 8080 | package_registry |
+
+Guild Service is available from the host at `http://localhost:8087`, and Package
+Registry Service is available at `http://localhost:8088`. Inside the Docker
+network, both services listen on port `8080`: `8087:8080` means host port 8087
+→ container port 8080, while `8088:8080` means host port 8088 → container
+port 8080.
+
+Source and service-specific startup instructions:
+
+- [Guild Service directory](./guild-service/) and [Guild Service README](./guild-service/README.md)
+- [Package Registry Service directory](./package-registry/) and [Package Registry Service README](./package-registry/README.md)
+
+Both services use `PORT` (default `8080`), `DATABASE_URL`, `JWT_SECRET`, and
+`SERVICE_JWT_SECRET`. Guild Service also uses `USER_MANAGEMENT_SERVICE_URL` and
+`NOTIFICATION_SERVICE_URL`; Package Registry Service uses
+`USER_MANAGEMENT_SERVICE_URL` and `TAMAGOTCHI_SERVICE_URL`. If a corresponding
+`*_SERVICE_URL` is empty, the service uses its built-in mock dependency and can
+run independently.
 
 ### Testing
 

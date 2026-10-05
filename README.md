@@ -1652,3 +1652,15 @@ The CPR is additionally tagged at each lab milestone (`v1.0-lab1`, `v2.0-lab2`, 
 6. **Review** — address feedback and obtain the required approvals.
 7. **Merge** — squash and merge; delete the branch.
 8. **Release** — merge `develop` into `main` and tag before each lab presentation.
+
+### Gateway authentication for Guild and Package Registry
+
+These services receive REST identity through trusted gateway headers and no longer validate incoming JWTs. Configure a non-empty `GATEWAY_SHARED_SECRET` in `.env` (shared by the gateway and both services). Guild also uses `API_GATEWAY_URL` for token validation before direct WebSocket connections. Business permissions remain checked by the owning service; outgoing service credentials still use `SERVICE_JWT_SECRET`.
+
+Rebuild the changed services from this checkout:
+
+```sh
+docker compose up -d --build api-gateway guild-service package-registry-service
+```
+
+REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.

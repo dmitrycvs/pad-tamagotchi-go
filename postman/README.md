@@ -37,10 +37,17 @@ with the claims the services verify: `sub`, `package_id`, `roles`, `exp`. Each
 token's `sub` is the user id that collection puts in its URLs, so ownership checks
 pass.
 
-You only need `jwt_secret` and `service_jwt_secret` to match the stack. They
-default to the values in `.env.example`, so a stack started from an unmodified
-`.env.example` works with no setup. If you changed the secrets in `.env`, change
-these two variables to match.
+You need `jwt_secret` and `service_jwt_secret` to match the stack. Guild and
+Package Registry exports keep these fields empty. Create a local Postman
+environment with `jwt_secret` set to `JWT_SECRET` and `service_jwt_secret` set to
+`SERVICE_JWT_SECRET` from your stack `.env`, then select that environment. If you
+already have `tamagotchi.local.postman_environment.json`, import and select
+**Tamagotchi — Local Gateway** instead. Environment values override collection
+fields; local environment exports are ignored by Git. Update the environment
+when stack signing secrets change. The pre-request
+scripts report a configuration error if either secret is missing or too short.
+Other collection defaults use `.env.example`; update their variables when using
+different stack secrets.
 
 The User Management collection is the exception for `jwt`: the **Login** request
 stores the real token the service issues, so run **Register** and **Login** first.
@@ -49,3 +56,5 @@ stores the real token the service issues, so run **Register** and **Login** firs
 
 Real tokens or credentials. Generated tokens are written back into the collection
 variables at run time; export from a clean copy, not after a run.
+
+Guild and Package Registry REST collections use the gateway at `http://localhost:8080`. Clients still send bearer JWTs; the gateway validates them and supplies trusted identity headers. Guild WebSocket connects directly to port 8087, and Guild Service delegates token validation to the gateway. Set the same non-empty `GATEWAY_SHARED_SECRET` on the gateway and both services.

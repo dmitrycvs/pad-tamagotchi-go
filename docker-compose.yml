@@ -21,6 +21,7 @@ services:
       retries: 10
 
   api-gateway:
+    build: ./api-gateway
     image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
@@ -28,7 +29,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
-      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-10s}
       GATEWAY_MAX_CONCURRENT_REQUESTS: ${GATEWAY_MAX_CONCURRENT_REQUESTS:-200}
       # Upstreams are reached directly; every other service reaches its peers through the gateway.
@@ -157,6 +158,7 @@ services:
       - "8086:8080"
 
   guild-service:
+    build: ./guild-service
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-1.0.0}
     platform: linux/amd64
     restart: unless-stopped
@@ -165,8 +167,9 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
-      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      API_GATEWAY_URL: http://api-gateway:8080
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
@@ -174,6 +177,7 @@ services:
       - "8087:8080"
 
   package-registry-service:
+    build: ./package-registry
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-1.0.0}
     platform: linux/amd64
     restart: unless-stopped
@@ -182,7 +186,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
-      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080

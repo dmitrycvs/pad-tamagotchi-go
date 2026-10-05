@@ -14,6 +14,8 @@ The critical constraint of this system is that **packages are not uniform**. One
 
 The platform is split into **8 microservices**, each owning a distinct domain and its own database. No service reads another service's tables — all cross-service data flows through REST calls or asynchronous events.
 
+In front of them sits the **API Gateway**, the single entry point: every REST request, from a client or from another service, passes through it. The gateway authorizes the request and routes it to the owning service.
+
 ---
 
 ## Team & Service Ownership
@@ -21,7 +23,7 @@ The platform is split into **8 microservices**, each owning a distinct domain an
 | # | Owner | Services |
 |---|-------|----------|
 | 1 | **Costov Maxim** | Guild Service, Package Registry Service |
-| 2 | **Cvasiuc Dmitrii** | Tamagotchi Service, Notification Service |
+| 2 | **Cvasiuc Dmitrii** | Tamagotchi Service, Notification Service, API Gateway |
 | 3 | **Tatarintev Denis** | Map Service, Monster Raid Service |
 | 4 | **Obrijan Filip** | User Management Service, Battle Service |
 
@@ -38,6 +40,8 @@ Services are paired by coupling: each owner holds the two services that talk to 
 | **Tatarintev Denis** | Map, Monster Raid | **C#** (ASP.NET Core + EF Core) | PostgreSQL + PostGIS | REST, SignalR for live raid state, idempotent operations | NetTopologySuite gives EF Core first-class geometry types over PostGIS, so proximity queries use real spatial indexes instead of hand-rolled distance math over every user. SignalR handles the raid clicker's live HP fan-out with reconnection and group management built in, which matters because raid damage arrives concurrently from many guild members — every write is idempotent via `event_id` so a reconnecting client can retry without double-counting. |
 | **Obrijan Filip** | User Management, Battle | **C#** (ASP.NET Core + EF Core) | PostgreSQL | REST with JWT issuance, SignalR for live battle state, atomic transactions | ASP.NET Core ships identity, password hashing and JWT bearer authentication as first-class components, so the platform's auth root needs very little hand-rolled security code — the part most expensive to get wrong. EF Core transactions over PostgreSQL keep the global-currency ledger ACID, which matters because battle rewards debit one user and credit another. SignalR carries live turn updates with reconnection and group management built in, so a dropped phone connection mid-battle recovers without custom plumbing. |
 
+| **Cvasiuc Dmitrii** | API Gateway | **Java** (Spring Boot 4 + Spring Cloud Gateway, WebFlux) | — (stateless) | REST reverse proxy, JWT authorization, WebSocket negotiation, timeouts & concurrency limits | Spring Cloud Gateway runs on Netty's non-blocking event loop, so thousands of proxied requests in flight cost a handful of threads, and per-route timeouts and request cancellation are built in. Doing authorization once at the edge removes duplicate JWT handling from eight services written in two languages. The gateway holds no state, so it scales horizontally behind any load balancer. Java was the language banned for the services in Lab 1 and is required for the gateway in Lab 2. |
+
 > **Note:** The team satisfies the two-language requirement with **Go** (Costov Maxim, Cvasiuc Dmitrii) and **C#** (Tatarintev Denis, Obrijan Filip). Both halves speak the same REST/JSON contract documented below, so the language split is invisible across service boundaries — the only cross-stack concern is keeping WebSocket frame shapes identical between Go's `gorilla/websocket` and .NET's SignalR, which the contract pins down explicitly.
 
 ---
@@ -48,6 +52,7 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 **How the services communicate:**
 
+- **API Gateway** is the single entry point: clients and services alike send REST calls to it, and it validates the JWT and forwards the request to the owning service with trusted identity headers in place of the token. For live connections it only negotiates: the client gets back a URL to the service's WebSocket and connects directly.
 - **Notification Service** is the delivery boundary — every service except Package Registry publishes events to it, and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
 - **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle credits global currency and XP through it, and Package Registry grants moderator/admin roles through it.
 - **Package Registry Service** is the configuration authority — Battle and Monster Raid read stat-interpretation rules from it before computing damage, and it supplies the stat definitions used when a new Tamagotchi is created.
@@ -129,17 +134,37 @@ Owns the catalog of **packages** participating in the ecosystem — identifier/n
 
 **Admins** are globally privileged users who design and schedule **Monster Raids**, defining monster name, description, sprites, maximum HP, combat statistics, weaknesses, resistances, special properties, raid duration, participant limits and reward configuration, and who may schedule, activate, deactivate or cancel raids.
 
+### 9. API Gateway
+
+Owns the **edge of the system**: routing every REST request to the service that owns its path, **authorizing** it (JWT validation and the per-endpoint access level stated in this contract), and enforcing a **task timeout** and a **concurrent task limit**. Negotiates WebSocket connections by issuing a short-lived ticket and the service's direct URL. Source and full documentation: [api-gateway/README.md](./api-gateway/README.md).
+
+**Does not own:** any business data or fine-grained permissions (ownership, guild roles, package moderators). It is stateless; owning services still make those decisions using the identity the gateway passes them.
+
 ---
 
 ## Authentication
 
-Endpoints marked **Headers: `Authorization: Bearer <jwt>`** require a valid user JWT issued by the **User Management Service**. The token carries:
+All requests enter through the **API Gateway** (`http://localhost:8080`). Endpoints marked **Headers: `Authorization: Bearer <jwt>`** require a valid user JWT issued by the **User Management Service**. The token carries:
 
 - `sub` — the user UUID
 - `package_id` — the package the session belongs to
 - `roles` — e.g. `["user"]`, `["user", "moderator"]`, `["user", "admin"]`
 
 Service-to-service calls (e.g. Battle → Tamagotchi) use a dedicated **service JWT** signed with a shared internal secret and are marked **`Authorization: Bearer <service_jwt>`**.
+
+**The gateway validates the token and does not forward the `Authorization` header.** The downstream service receives these headers instead; the gateway drops any copy a client sends, so they cannot be spoofed:
+
+| Header | Value |
+|---|---|
+| `X-Auth-Type` | `user` or `service` (absent on public endpoints) |
+| `X-User-Id` | user UUID (`sub`), user tokens only |
+| `X-Package-Id` | `package_id`, user tokens only |
+| `X-Service-Name` | calling service's `sub`, service tokens only |
+| `X-User-Roles` | comma-separated roles, e.g. `user,admin` |
+| `X-Gateway-Secret` | `GATEWAY_SHARED_SECRET`, when configured |
+| `X-Request-Id` | correlation id, echoed back to the client |
+
+The gateway rejects a missing or invalid token with **401**, a user token on a `<service_jwt>` endpoint with **403**, and a non-admin on an `admin`-only endpoint with **403**. Checks that need domain data (ownership, guild role, package moderator) remain in the owning service.
 
 All write endpoints that can be retried by a client or replayed by an event bus accept an **`event_id`** and are **idempotent**: repeating a call with the same `event_id` returns the original result without applying the effect twice.
 
@@ -1372,13 +1397,59 @@ Headers: `Authorization: Bearer <jwt>` (requires `admin` role)
 
 ---
 
+### 9. API Gateway
+
+**Base URL:** `http://localhost:8080` — every path documented above is served here unchanged.
+
+#### Negotiate a WebSocket Connection
+
+`POST /api/realtime/{channel}/{id}` (or `POST /api/realtime/map`)
+The WebSocket URLs above are not called through the gateway. The client asks the gateway for a direct URL and connects to the service itself, so the gateway is never in the middle of a long-lived socket. `channel` is one of `battles`, `raids`, `guilds`, `map`.
+Headers: `Authorization: Bearer <jwt>`
+
+Success (200 OK):
+
+```json
+{
+  "channel": "battles",
+  "resource_id": "battle-uuid-001",
+  "url": "ws://localhost:8082/ws/battles/battle-uuid-001?token=<ticket>",
+  "token": "<ticket>",
+  "expires_at": "2026-10-05T12:01:00Z",
+  "expires_in": 60
+}
+```
+
+`token` is a short-lived ticket: the caller's own JWT claims, re-signed with the same secret and an expiry of 60 seconds. Services validate it exactly like a login token.
+
+Error (404 Not Found):
+
+```json
+{ "error": "Unknown realtime channel 'chess'." }
+```
+
+#### Gateway Errors
+
+Any endpoint can additionally return the errors below. Each carries the header `X-Gateway-Error: true`, which tells it apart from an error returned by the service.
+
+| Status | `error` | When |
+|---|---|---|
+| 401 | `Missing or malformed Authorization header.` / `Invalid or expired token.` | token missing, badly signed or expired |
+| 403 | `This endpoint is restricted to internal services.` / `This endpoint requires the admin role.` | wrong token kind or role |
+| 404 | `No service handles this path.` | unknown path |
+| 503 | `Gateway is at its concurrent request limit. Retry shortly.` (with `Retry-After: 1`) | concurrent task limit reached |
+| 503 | `Upstream service unavailable.` | owning service down or unreachable |
+| 504 | `Request timed out after 10000 ms.` / `Upstream service timed out.` | task timeout reached |
+
+---
+
 ## Running the Services
 
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **4 GB** of free RAM — nine containers, eight services plus PostgreSQL
-- Ports **5432** and **8081–8088** free on the host
+- Roughly **4 GB** of free RAM — ten containers: the gateway, eight services and PostgreSQL
+- Ports **5432** and **8080–8088** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1407,6 +1478,7 @@ version. The DockerHub namespace per owner is set in `.env`.
 
 | Service | Image | Host port |
 |---|---|---|
+| **API Gateway** | `dmitrycvs/api-gateway:2.0.0` | **8080** |
 | User Management | `filipel2004/user-management-service:1.0.0` | 8081 |
 | Battle | `filipel2004/battle-service:1.0.0` | 8082 |
 | Tamagotchi | `dmitrycvs/tamagotchi-service:1.0.0` | 8083 |
@@ -1416,9 +1488,12 @@ version. The DockerHub namespace per owner is set in `.env`.
 | Guild | `maxkostov/guild-service:1.0.0` | 8087 |
 | Package Registry | `maxkostov/package-registry-service:1.0.0` | 8088 |
 
-Services reach each other over the compose network by service name on port 8080
-(e.g. `http://tamagotchi-service:8080`); the host ports above are for testing
-from outside the stack.
+Clients use the gateway at `http://localhost:8080`. Services also reach each other
+through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
+and only the gateway addresses services directly by name (e.g.
+`http://tamagotchi-service:8080`). The services' own host ports stay open for the
+direct WebSocket connections handed out by `POST /api/realtime/...`, and for
+debugging.
 
 ### Guild and Package Registry Services
 
@@ -1477,7 +1552,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix | Purpose | Example |

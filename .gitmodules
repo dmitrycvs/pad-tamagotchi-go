@@ -24,3 +24,6 @@
 [submodule "user-management-service"]
 	path = user-management-service
 	url = https://github.com/filipel2004/user-management-service.git
+[submodule "api-gateway"]
+	path = api-gateway
+	url = https://github.com/dmitrycvs/api-gateway.git

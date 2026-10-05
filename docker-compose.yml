@@ -20,6 +20,35 @@ services:
       timeout: 5s
       retries: 10
 
+  api-gateway:
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.0}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-10s}
+      GATEWAY_MAX_CONCURRENT_REQUESTS: ${GATEWAY_MAX_CONCURRENT_REQUESTS:-200}
+      # Upstreams are reached directly; every other service reaches its peers through the gateway.
+      UPSTREAM_USER_MANAGEMENT_URL: http://user-management-service:8080
+      UPSTREAM_BATTLE_URL: http://battle-service:8080
+      UPSTREAM_TAMAGOTCHI_URL: http://tamagotchi-service:8080
+      UPSTREAM_NOTIFICATION_URL: http://notification-service:8080
+      UPSTREAM_MAP_URL: http://map-service:8080
+      UPSTREAM_MONSTER_RAID_URL: http://monster-raid-service:8080
+      UPSTREAM_GUILD_URL: http://guild-service:8080
+      UPSTREAM_PACKAGE_REGISTRY_URL: http://package-registry-service:8080
+      # Handed to clients by POST /api/realtime/...: they connect to these directly.
+      WS_PUBLIC_URL_BATTLE: ${WS_PUBLIC_URL_BATTLE:-ws://localhost:8082}
+      WS_PUBLIC_URL_MAP: ${WS_PUBLIC_URL_MAP:-ws://localhost:8085}
+      WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8086}
+      WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8087}
+      PORT: 8080
+    ports:
+      - "8080:8080"
+
   user-management-service:
     image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-1.0.0}
     platform: linux/amd64
@@ -31,7 +60,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/user_management
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8081:8080"
@@ -47,10 +76,10 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/battle
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8082:8080"
@@ -66,9 +95,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8083:8080"
@@ -101,8 +130,8 @@ services:
       DATABASE_URL: Host=postgres;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PROXIMITY_THRESHOLD_METERS: ${PROXIMITY_THRESHOLD_METERS:-6}
       PORT: 8080
     ports:
@@ -119,10 +148,10 @@ services:
       DATABASE_URL: Host=postgres;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      GUILD_SERVICE_URL: http://guild-service:8080
-      TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      GUILD_SERVICE_URL: http://api-gateway:8080
+      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8086:8080"
@@ -138,8 +167,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8087:8080"
@@ -155,8 +184,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8088:8080"

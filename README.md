@@ -1473,20 +1473,21 @@ and `docker compose down -v` discards it.
 
 ### Service Images
 
-Every service is published to DockerHub as a public image, tagged with its
-version. The DockerHub namespace per owner is set in `.env`.
+Compose names each service image with a versioned DockerHub tag. Build locally
+with `docker compose up --build` until that version has been published. The
+DockerHub namespace per owner is set in `.env`.
 
 | Service | Image | Host port |
 |---|---|---|
-| **API Gateway** | `dmitrycvs/api-gateway:2.0.0` | **8080** |
+| **API Gateway** | `dmitrycvs/api-gateway:2.0.1` | **8080** |
 | User Management | `filipel2004/user-management-service:2.0.0` | 8081 |
 | Battle | `filipel2004/battle-service:2.0.0` | 8082 |
 | Tamagotchi | `dmitrycvs/tamagotchi-service:2.0.0` | 8083 |
 | Notification | `dmitrycvs/notification-service:2.0.0` | 8084 |
 | Map | `takima/pad-map-service:2.0.1` | 8085 |
 | Monster Raid | `takima/pad-monster-raid-service:2.0.1` | 8086 |
-| Guild | `maxkostov/guild-service:1.0.0` | 8087 |
-| Package Registry | `maxkostov/package-registry-service:1.0.0` | 8088 |
+| Guild | `maxkostov/guild-service:2.0.0` | 8087 |
+| Package Registry | `maxkostov/package-registry-service:2.0.0` | 8088 |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -1513,8 +1514,11 @@ Source and service-specific startup instructions:
 - [Guild Service directory](./guild-service/) and [Guild Service README](./guild-service/README.md)
 - [Package Registry Service directory](./package-registry/) and [Package Registry Service README](./package-registry/README.md)
 
-Both services use `PORT` (default `8080`), `DATABASE_URL`, `JWT_SECRET`, and
-`SERVICE_JWT_SECRET`. Guild Service also uses `USER_MANAGEMENT_SERVICE_URL` and
+Both services use `PORT` (default `8080`), `DATABASE_URL`, a required
+`GATEWAY_SHARED_SECRET`, and `SERVICE_JWT_SECRET` for outgoing calls. They use
+`REQUEST_TIMEOUT_SECONDS` (default `8`) and `MAX_CONCURRENT_REQUESTS`
+(default `100`) for REST work. Guild Service also uses `API_GATEWAY_URL` for
+WebSocket identity checks, `USER_MANAGEMENT_SERVICE_URL`, and
 `NOTIFICATION_SERVICE_URL`; Package Registry Service uses
 `USER_MANAGEMENT_SERVICE_URL` and `TAMAGOTCHI_SERVICE_URL`. If a corresponding
 `*_SERVICE_URL` is empty, the service uses its built-in mock dependency and can
@@ -1522,8 +1526,10 @@ run independently.
 
 ### Testing
 
-Postman collections for every service live in [`postman/`](./postman). Point a
-collection's `base_url` at the matching host port above.
+Start with the [Postman smoke collection](./postman/lab2-smoke.postman_collection.json):
+send its requests in order through the gateway at port 8080. Detailed collections
+for each service live in [`postman/services/`](./postman/services); see the
+[Postman guide](./postman/README.md) for setup and expected responses.
 
 ---
 
@@ -1652,3 +1658,19 @@ The CPR is additionally tagged at each lab milestone (`v1.0-lab1`, `v2.0-lab2`, 
 6. **Review** — address feedback and obtain the required approvals.
 7. **Merge** — squash and merge; delete the branch.
 8. **Release** — merge `develop` into `main` and tag before each lab presentation.
+
+### Gateway authentication for Guild and Package Registry
+
+These services receive REST identity through trusted gateway headers and no longer validate incoming JWTs. Configure a non-empty `GATEWAY_SHARED_SECRET` in `.env` (shared by the gateway and both services). Guild also uses `API_GATEWAY_URL` for token validation before direct WebSocket connections. Business permissions remain checked by the owning service; outgoing service credentials still use `SERVICE_JWT_SECRET`.
+
+Rebuild the changed services from this checkout:
+
+```sh
+docker compose up -d --build api-gateway guild-service package-registry-service
+```
+
+REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
+
+Both services expose `/health`, return 503 with `Retry-After: 1` when their concurrency limit is reached, and return 504 when their own request deadline expires. Their Lab 2 release workflows publish the version in `VERSION` and `latest` after a merge to `main`.
+
+The [Lab 2 completion plan](./docs/lab2-completion-plan.md) records team-wide requirements and the local verification completed for Guild and Package Registry.

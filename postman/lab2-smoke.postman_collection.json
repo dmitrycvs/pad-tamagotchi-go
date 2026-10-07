@@ -1,0 +1,656 @@
+{
+  "info": {
+    "_postman_id": "4e888c83-fc3e-431b-a73b-083fbfb674a2",
+    "name": "Tamagotchi Go — Lab 2 Smoke Test",
+    "description": "Run all requests in order with the Collection Runner against the published Compose stack. Registers one test user and creates one guild. Uses the real JWT from User Management; no signing secrets or Postman environment are required. Route probes for Package Registry and Battle intentionally return 404 for nonexistent IDs. Full battle, raid participation and Firebase push delivery need separate scenarios.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 Gateway health",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Gateway healthy\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/health"
+      },
+      "response": []
+    },
+    {
+      "name": "02 Register test user",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const suffix = Date.now().toString() + Math.floor(Math.random() * 10000).toString();",
+              "pm.collectionVariables.set(\"run_id\", suffix);",
+              "pm.collectionVariables.set(\"run_username\", \"lab2_\" + suffix);",
+              "pm.collectionVariables.set(\"run_email\", \"lab2_\" + suffix + \"@example.invalid\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"User ID returned\", () => pm.expect(body.user_id).to.be.a(\"string\").and.not.empty);",
+              "  pm.collectionVariables.set(\"user_id\", body.user_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/users/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{run_username}}\",\n  \"email\": \"{{run_email}}\",\n  \"password\": \"{{run_password}}\",\n  \"package_id\": \"{{package_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Creates a unique test account on every collection run."
+      },
+      "response": []
+    },
+    {
+      "name": "03 Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"JWT returned\", () => pm.expect(body.jwt).to.be.a(\"string\").and.not.empty);",
+              "  pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "  pm.collectionVariables.set(\"user_id\", body.user_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/users/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{run_email}}\",\n  \"password\": \"{{run_password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "04 Gateway identity",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Correct identity\", () => {",
+              "    pm.expect(body.type).to.eql(\"user\");",
+              "    pm.expect(body.sub).to.eql(pm.collectionVariables.get(\"user_id\"));",
+              "  });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/auth/me"
+      },
+      "response": []
+    },
+    {
+      "name": "05 User profile",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test(\"Correct user\", () => pm.expect(pm.response.json().user_id).to.eql(pm.collectionVariables.get(\"user_id\")));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/users/{{user_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "06 User currency",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/users/{{user_id}}/currency"
+      },
+      "response": []
+    },
+    {
+      "name": "07 Tamagotchi type matrix",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/tamagotchis/types"
+      },
+      "response": []
+    },
+    {
+      "name": "08 User Tamagotchis",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/tamagotchis?owner_id={{user_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "09 Create guild",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Guild ID returned\", () => pm.expect(body.guild_id).to.be.a(\"string\").and.not.empty);",
+              "  pm.collectionVariables.set(\"guild_id\", body.guild_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/guilds",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Lab 2 Postman {{run_id}}\",\n  \"description\": \"Integration smoke test\",\n  \"owner_id\": \"{{user_id}}\",\n  \"event_id\": \"{{$guid}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10 Get guild",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/guilds/{{guild_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "11 Guild WebSocket negotiation",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Direct WebSocket URL returned\", () => pm.expect(body.url).to.match(/^wss?:\\/\\//));",
+              "  pm.collectionVariables.set(\"guild_ws_url\", body.url);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/realtime/guilds/{{guild_id}}",
+        "description": "Verifies negotiation; open the returned URL in Postman to test the direct WebSocket connection."
+      },
+      "response": []
+    },
+    {
+      "name": "12 Nearby map users",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test(\"Nearby list returned\", () => pm.expect(pm.response.json().nearby).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/map/nearby?user_id={{user_id}}&radius_meters=100"
+      },
+      "response": []
+    },
+    {
+      "name": "13 Active raids",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test(\"Raid list returned\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/raids?status=active"
+      },
+      "response": []
+    },
+    {
+      "name": "14 Notification types",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/notifications/types"
+      },
+      "response": []
+    },
+    {
+      "name": "15 User notifications",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/notifications?user_id={{user_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "16 Package Registry routing",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Response came from service\", () => pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.not.eql(\"true\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/packages/{{missing_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "17 Battle routing",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Response came from service\", () => pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.not.eql(\"true\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/battles/{{missing_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "18 Map without JWT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejected request\", () => pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.eql(\"true\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/map/nearby?user_id={{user_id}}&radius_meters=100"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "package_id",
+      "value": "00000000-0000-0000-0000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "missing_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "type": "string"
+    },
+    {
+      "key": "run_password",
+      "value": "PostmanTest123!",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guild_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guild_ws_url",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

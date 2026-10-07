@@ -21,14 +21,15 @@ services:
       retries: 10
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.0}
+    build: ./api-gateway
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     environment:
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
-      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-10s}
       GATEWAY_MAX_CONCURRENT_REQUESTS: ${GATEWAY_MAX_CONCURRENT_REQUESTS:-200}
       # Upstreams are reached directly; every other service reaches its peers through the gateway.
@@ -177,7 +178,8 @@ services:
       - "8086:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-1.0.0}
+    build: ./guild-service
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -185,8 +187,11 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
-      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      API_GATEWAY_URL: http://api-gateway:8080
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
@@ -194,7 +199,8 @@ services:
       - "8087:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-1.0.0}
+    build: ./package-registry
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -202,8 +208,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
-      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
       PORT: 8080

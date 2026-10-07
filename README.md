@@ -1526,8 +1526,10 @@ run independently.
 
 ### Testing
 
-Postman collections for every service live in [`postman/`](./postman). Point a
-collection's `base_url` at the matching host port above.
+Start with the [Postman smoke collection](./postman/lab2-smoke.postman_collection.json):
+send its requests in order through the gateway at port 8080. Detailed collections
+for each service live in [`postman/services/`](./postman/services); see the
+[Postman guide](./postman/README.md) for setup and expected responses.
 
 ---
 

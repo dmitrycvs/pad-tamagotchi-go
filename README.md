@@ -161,7 +161,7 @@ Service-to-service calls (e.g. Battle → Tamagotchi) use a dedicated **service 
 | `X-Package-Id` | `package_id`, user tokens only |
 | `X-Service-Name` | calling service's `sub`, service tokens only |
 | `X-User-Roles` | comma-separated roles, e.g. `user,admin` |
-| `X-Gateway-Secret` | `GATEWAY_SHARED_SECRET`, when configured |
+| `X-Gateway-Secret` | `GATEWAY_SHARED_SECRET`, required by downstream services |
 | `X-Request-Id` | correlation id, echoed back to the client |
 
 The gateway rejects a missing or invalid token with **401**, a user token on a `<service_jwt>` endpoint with **403**, and a non-admin on an `admin`-only endpoint with **403**. Checks that need domain data (ownership, guild role, package moderator) remain in the owning service.
@@ -1484,8 +1484,8 @@ DockerHub namespace per owner is set in `.env`.
 | Battle | `filipel2004/battle-service:2.0.0` | 8082 |
 | Tamagotchi | `dmitrycvs/tamagotchi-service:2.0.0` | 8083 |
 | Notification | `dmitrycvs/notification-service:2.0.0` | 8084 |
-| Map | `takima/pad-map-service:1.0.0` | 8085 |
-| Monster Raid | `takima/pad-monster-raid-service:1.0.0` | 8086 |
+| Map | `takima/pad-map-service:2.0.1` | 8085 |
+| Monster Raid | `takima/pad-monster-raid-service:2.0.1` | 8086 |
 | Guild | `maxkostov/guild-service:2.0.0` | 8087 |
 | Package Registry | `maxkostov/package-registry-service:2.0.0` | 8088 |
 

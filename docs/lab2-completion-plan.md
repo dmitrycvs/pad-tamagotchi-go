@@ -19,6 +19,7 @@ The assignment in `PAD_LAB_2.pdf` lists requirements through Grade 9. To aim for
 - `go vet ./...` and `go test -race -count=1 -coverpkg=./...` passed with PostgreSQL: Guild 71.8% coverage, Registry 77.1% coverage.
 - `docker compose build guild-service package-registry-service` produced local `2.0.0` images. Gateway, PostgreSQL and both services started healthy using `docker-compose.local-smoke.yml`.
 - Both service smoke scripts passed through the gateway, including Guild WebSocket chat, Registry service-token reads, domain permissions, and idempotent writes. Direct REST calls with forged identity headers and no shared secret returned 401.
+- Both service repositories now have a remote `develop` branch created from `main`; feature branches and the CPR integration branch are pushed. PRs, branch protection and DockerHub secrets still need GitHub account access.
 - The smoke override enables mocks only for unavailable teammate dependencies. It does not prove that all team services run together or that DockerHub images and GitHub branch protection are configured.
 
 For the isolated local check, start `postgres`, `api-gateway`, `guild-service`, and `package-registry-service` with:
@@ -35,5 +36,5 @@ Export `JWT_SECRET` and `SERVICE_JWT_SECRET` from your local `.env`, then run ea
 2. Run `go vet ./...` and `go test -race -count=1 -coverpkg=./... -coverprofile=coverage.out ./...` with `TEST_DATABASE_URL` against PostgreSQL; require at least 70% coverage.
 3. Build both Docker images and verify `/health`, 503, 504, authorized REST, rejected direct REST, and Guild WebSocket chat.
 4. Commit and push service feature branches, then update their CPR submodule pointers and Compose configuration on the shared feature branch.
-5. Configure `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` in both service repositories, establish the team `develop` branch and protection rules, then open PRs according to `RULES.md`.
+5. Configure `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` in both service repositories, protect the new remote `develop` branches, then open PRs according to `RULES.md`.
 6. After review and merges to `develop`, merge the release into `main`. Verify both `2.0.0` and `latest` image tags and Git tags, then run a full-stack demonstration with the team.

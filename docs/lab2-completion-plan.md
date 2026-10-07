@@ -14,6 +14,21 @@ The assignment in `PAD_LAB_2.pdf` lists requirements through Grade 9. To aim for
 | Grade 8: automated DockerHub release from main | Each repository's CI passes, release workflow publishes `2.0.0` and `latest`, and version is traceable to a Git tag | Each owner. Guild and Registry workflows are prepared; DockerHub secrets, PR merges and actual releases remain. |
 | Grade 9: authorization at gateway | Gateway validates JWT and removes `Authorization`; downstream services receive trusted identity and preserve domain permissions | Team. Guild and Registry use trusted gateway headers and reject direct REST calls. Verify the full stack. |
 
+## Verified for Guild and Registry on 2026-10-07
+
+- `go vet ./...` and `go test -race -count=1 -coverpkg=./...` passed with PostgreSQL: Guild 71.8% coverage, Registry 77.1% coverage.
+- `docker compose build guild-service package-registry-service` produced local `2.0.0` images. Gateway, PostgreSQL and both services started healthy using `docker-compose.local-smoke.yml`.
+- Both service smoke scripts passed through the gateway, including Guild WebSocket chat, Registry service-token reads, domain permissions, and idempotent writes. Direct REST calls with forged identity headers and no shared secret returned 401.
+- The smoke override enables mocks only for unavailable teammate dependencies. It does not prove that all team services run together or that DockerHub images and GitHub branch protection are configured.
+
+For the isolated local check, start `postgres`, `api-gateway`, `guild-service`, and `package-registry-service` with:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.local-smoke.yml up -d --build postgres api-gateway guild-service package-registry-service
+```
+
+Export `JWT_SECRET` and `SERVICE_JWT_SECRET` from your local `.env`, then run each service's `scripts/smoke.sh` from its own directory. Never commit `.env` or print the secrets in logs.
+
 ## Guild and Registry execution order
 
 1. Complete and review request limits, context-aware database calls, health checks, and their tests in each service repository.

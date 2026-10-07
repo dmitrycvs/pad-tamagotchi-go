@@ -99,6 +99,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      # This service reads a Go duration, so the team's seconds value gets an "s".
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT_SECONDS:-8}s
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
@@ -117,6 +121,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      # This service reads a Go duration, so the team's seconds value gets an "s".
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT_SECONDS:-8}s
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}

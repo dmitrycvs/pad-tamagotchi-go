@@ -1481,8 +1481,8 @@ version. The DockerHub namespace per owner is set in `.env`.
 | **API Gateway** | `dmitrycvs/api-gateway:2.0.0` | **8080** |
 | User Management | `filipel2004/user-management-service:2.0.0` | 8081 |
 | Battle | `filipel2004/battle-service:2.0.0` | 8082 |
-| Tamagotchi | `dmitrycvs/tamagotchi-service:1.0.0` | 8083 |
-| Notification | `dmitrycvs/notification-service:1.0.0` | 8084 |
+| Tamagotchi | `dmitrycvs/tamagotchi-service:2.0.0` | 8083 |
+| Notification | `dmitrycvs/notification-service:2.0.0` | 8084 |
 | Map | `takima/pad-map-service:1.0.0` | 8085 |
 | Monster Raid | `takima/pad-monster-raid-service:1.0.0` | 8086 |
 | Guild | `maxkostov/guild-service:1.0.0` | 8087 |

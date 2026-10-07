@@ -22,7 +22,7 @@ services:
 
   api-gateway:
     build: ./api-gateway
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     environment:

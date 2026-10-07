@@ -1473,8 +1473,9 @@ and `docker compose down -v` discards it.
 
 ### Service Images
 
-Every service is published to DockerHub as a public image, tagged with its
-version. The DockerHub namespace per owner is set in `.env`.
+Compose names each service image with a versioned DockerHub tag. Build locally
+with `docker compose up --build` until that version has been published. The
+DockerHub namespace per owner is set in `.env`.
 
 | Service | Image | Host port |
 |---|---|---|
@@ -1485,8 +1486,8 @@ version. The DockerHub namespace per owner is set in `.env`.
 | Notification | `dmitrycvs/notification-service:1.0.0` | 8084 |
 | Map | `takima/pad-map-service:1.0.0` | 8085 |
 | Monster Raid | `takima/pad-monster-raid-service:1.0.0` | 8086 |
-| Guild | `maxkostov/guild-service:1.0.0` | 8087 |
-| Package Registry | `maxkostov/package-registry-service:1.0.0` | 8088 |
+| Guild | `maxkostov/guild-service:2.0.0` | 8087 |
+| Package Registry | `maxkostov/package-registry-service:2.0.0` | 8088 |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -1513,8 +1514,11 @@ Source and service-specific startup instructions:
 - [Guild Service directory](./guild-service/) and [Guild Service README](./guild-service/README.md)
 - [Package Registry Service directory](./package-registry/) and [Package Registry Service README](./package-registry/README.md)
 
-Both services use `PORT` (default `8080`), `DATABASE_URL`, `JWT_SECRET`, and
-`SERVICE_JWT_SECRET`. Guild Service also uses `USER_MANAGEMENT_SERVICE_URL` and
+Both services use `PORT` (default `8080`), `DATABASE_URL`, a required
+`GATEWAY_SHARED_SECRET`, and `SERVICE_JWT_SECRET` for outgoing calls. They use
+`REQUEST_TIMEOUT_SECONDS` (default `8`) and `MAX_CONCURRENT_REQUESTS`
+(default `100`) for REST work. Guild Service also uses `API_GATEWAY_URL` for
+WebSocket identity checks, `USER_MANAGEMENT_SERVICE_URL`, and
 `NOTIFICATION_SERVICE_URL`; Package Registry Service uses
 `USER_MANAGEMENT_SERVICE_URL` and `TAMAGOTCHI_SERVICE_URL`. If a corresponding
 `*_SERVICE_URL` is empty, the service uses its built-in mock dependency and can
@@ -1664,3 +1668,5 @@ docker compose up -d --build api-gateway guild-service package-registry-service
 ```
 
 REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
+
+Both services expose `/health`, return 503 with `Retry-After: 1` when their concurrency limit is reached, and return 504 when their own request deadline expires. Their Lab 2 release workflows publish the version in `VERSION` and `latest` after a merge to `main`.

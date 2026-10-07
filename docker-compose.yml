@@ -171,7 +171,7 @@ services:
 
   guild-service:
     build: ./guild-service
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-1.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -181,6 +181,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       API_GATEWAY_URL: http://api-gateway:8080
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
@@ -190,7 +192,7 @@ services:
 
   package-registry-service:
     build: ./package-registry
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-1.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -200,6 +202,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
       PORT: 8080

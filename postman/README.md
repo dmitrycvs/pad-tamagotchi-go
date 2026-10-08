@@ -1,35 +1,33 @@
-# Postman Collections
+# Postman: start here
 
-One collection per microservice, exported from Postman as **Collection v2.1**.
+Import [lab2-smoke.postman_collection.json](./lab2-smoke.postman_collection.json).
+Select **No Environment**, then send requests **01–18 in order**, one by one, or
+run the whole collection with Postman's Collection Runner. Its scripts only
+create a unique test user and copy the returned JWT and IDs into collection
+variables. You can open any request, change it, and press **Send** manually.
 
-## Naming
+Start the published stack first:
 
+```sh
+docker compose pull
+docker compose up -d --no-build --pull never
 ```
-<service-name>.postman_collection.json
-```
 
-e.g. `tamagotchi-service.postman_collection.json`
+The smoke check uses `http://localhost:8080` and requires no local secrets. It
+creates a test user and a guild. `404` for the nonexistent Package Registry and
+Battle IDs, and `401` for the last request without a JWT, are **expected**.
+A successful run has 18 requests and 30 passing assertions. It checks gateway
+routing and authentication, but not a complete battle, raid participation, or
+Firebase push delivery.
 
-## What a collection must contain
+For individual endpoints, the nine detailed collections are in
+[services/](./services). Import only the service you want to inspect. Their REST
+requests use the gateway at port 8080; direct ports are used for service health
+checks and the Guild WebSocket. Most detailed collections generate test JWTs and
+need the local `tamagotchi.local.postman_environment.json` selected in Postman.
+That ignored file must contain `jwt_secret` and `service_jwt_secret` matching
+`.env`. Some requests need package, monster, Tamagotchi, guild, or battle records
+created first.
 
-- One request per endpoint in that service's section of the [communication contract](../README.md#communication-contract)
-- A request body matching the documented payload
-- A saved example response for at least the success case, and for any documented error case (401, 403, 409)
-
-## Variables
-
-Use collection variables rather than hardcoded hosts, so a collection runs against
-either a locally built service or the composed stack:
-
-| Variable | Local default |
-|---|---|
-| `base_url` | `http://localhost:<service port>` |
-| `jwt` | a user token issued by the User Management Service |
-| `service_jwt` | a service-to-service token |
-
-Service ports are listed in [`docker-compose.yml`](../docker-compose.yml).
-
-## Do not commit
-
-Real tokens or credentials. Leave `jwt` and `service_jwt` empty in the exported
-file and set them in a Postman environment that stays local.
+Do not commit the local environment or export collections after running them
+with populated JWT variables.

@@ -20,8 +20,38 @@ services:
       timeout: 5s
       retries: 10
 
+  api-gateway:
+    build: ./api-gateway
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
+      GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-10s}
+      GATEWAY_MAX_CONCURRENT_REQUESTS: ${GATEWAY_MAX_CONCURRENT_REQUESTS:-200}
+      # Upstreams are reached directly; every other service reaches its peers through the gateway.
+      UPSTREAM_USER_MANAGEMENT_URL: http://user-management-service:8080
+      UPSTREAM_BATTLE_URL: http://battle-service:8080
+      UPSTREAM_TAMAGOTCHI_URL: http://tamagotchi-service:8080
+      UPSTREAM_NOTIFICATION_URL: http://notification-service:8080
+      UPSTREAM_MAP_URL: http://map-service:8080
+      UPSTREAM_MONSTER_RAID_URL: http://monster-raid-service:8080
+      UPSTREAM_GUILD_URL: http://guild-service:8080
+      UPSTREAM_PACKAGE_REGISTRY_URL: http://package-registry-service:8080
+      # Handed to clients by POST /api/realtime/...: they connect to these directly.
+      WS_PUBLIC_URL_BATTLE: ${WS_PUBLIC_URL_BATTLE:-ws://localhost:8082}
+      WS_PUBLIC_URL_MAP: ${WS_PUBLIC_URL_MAP:-ws://localhost:8085}
+      WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8086}
+      WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8087}
+      PORT: 8080
+    ports:
+      - "8080:8080"
+
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-1.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -31,13 +61,16 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/user_management
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       PORT: 8080
     ports:
       - "8081:8080"
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-1.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -47,16 +80,19 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/battle
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       PORT: 8080
     ports:
       - "8082:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-1.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -64,17 +100,21 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      # This service reads a Go duration, so the team's seconds value gets an "s".
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT_SECONDS:-8}s
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8083:8080"
 
   notification-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-1.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -82,6 +122,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      # This service reads a Go duration, so the team's seconds value gets an "s".
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT_SECONDS:-8}s
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
@@ -91,7 +135,7 @@ services:
       - "8084:8080"
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-1.0.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.0.2}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -101,15 +145,18 @@ services:
       DATABASE_URL: Host=postgres;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PROXIMITY_THRESHOLD_METERS: ${PROXIMITY_THRESHOLD_METERS:-6}
       PORT: 8080
     ports:
       - "8085:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-1.0.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.0.2}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -119,16 +166,20 @@ services:
       DATABASE_URL: Host=postgres;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      GUILD_SERVICE_URL: http://guild-service:8080
-      TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://package-registry-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
+      GUILD_SERVICE_URL: http://api-gateway:8080
+      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8086:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-1.0.0}
+    build: ./guild-service
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -136,16 +187,20 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
-      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      API_GATEWAY_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8087:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-1.0.0}
+    build: ./package-registry
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -153,10 +208,12 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
-      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
-      TAMAGOTCHI_SERVICE_URL: http://tamagotchi-service:8080
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
+      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
       PORT: 8080
     ports:
       - "8088:8080"

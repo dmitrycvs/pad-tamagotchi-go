@@ -51,7 +51,7 @@ services:
       - "8080:8080"
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-2.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -70,7 +70,7 @@ services:
       - "8081:8080"
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-2.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

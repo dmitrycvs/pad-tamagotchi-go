@@ -1492,8 +1492,8 @@ DockerHub namespace per owner is set in `.env`.
 | Battle                | `filipel2004/battle-service:2.0.0`          | 8082           |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:2.0.1`        | 8083           |
 | Notification          | `dmitrycvs/notification-service:2.0.1`      | 8084           |
-| Map                   | `takima/pad-map-service:2.0.1`              | 8085           |
-| Monster Raid          | `takima/pad-monster-raid-service:2.0.1`     | 8086           |
+| Map                   | `takima/pad-map-service:2.0.2`              | 8085           |
+| Monster Raid          | `takima/pad-monster-raid-service:2.0.2`     | 8086           |
 | Guild                 | `maxkostov/guild-service:2.0.0`             | 8087           |
 | Package Registry      | `maxkostov/package-registry-service:2.0.0`  | 8088           |
 

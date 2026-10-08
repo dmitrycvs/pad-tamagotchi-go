@@ -92,7 +92,7 @@ services:
       - "8082:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -114,7 +114,7 @@ services:
       - "8083:8080"
 
   notification-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-2.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

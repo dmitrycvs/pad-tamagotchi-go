@@ -1481,9 +1481,11 @@ and `docker compose down -v` discards it.
 
 ### Service Images
 
-Compose names each service image with a versioned DockerHub tag. Build locally
-with `docker compose up --build` until that version has been published. The
-DockerHub namespace per owner is set in `.env`.
+Compose always pulls each service image from DockerHub with a versioned tag; it
+never builds services locally. The DockerHub namespace per owner and the `TAG_*`
+versions are set in `.env`. To try unreleased code, build it from its submodule
+(`docker build -t <namespace>/<image>:dev ./<service-folder>`) and set the
+matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
@@ -1671,10 +1673,11 @@ The CPR is additionally tagged at each lab milestone (`v1.0-lab1`, `v2.0-lab2`, 
 
 These services receive REST identity through trusted gateway headers and no longer validate incoming JWTs. Configure a non-empty `GATEWAY_SHARED_SECRET` in `.env` (shared by the gateway and both services). Guild also uses `API_GATEWAY_URL` for token validation before direct WebSocket connections. Business permissions remain checked by the owning service; outgoing service credentials still use `SERVICE_JWT_SECRET`.
 
-Rebuild the changed services from this checkout:
+Start them with their published images:
 
 ```sh
-docker compose up -d --build api-gateway guild-service package-registry-service
+docker compose pull api-gateway guild-service package-registry-service
+docker compose up -d api-gateway guild-service package-registry-service
 ```
 
 REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.

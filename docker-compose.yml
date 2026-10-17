@@ -21,7 +21,6 @@ services:
       retries: 10
 
   api-gateway:
-    build: ./api-gateway
     image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
     platform: linux/amd64
     restart: unless-stopped
@@ -178,7 +177,6 @@ services:
       - "8086:8080"
 
   guild-service:
-    build: ./guild-service
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped
@@ -199,7 +197,6 @@ services:
       - "8087:8080"
 
   package-registry-service:
-    build: ./package-registry
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.0.0}
     platform: linux/amd64
     restart: unless-stopped

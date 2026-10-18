@@ -27,3 +27,6 @@
 [submodule "api-gateway"]
 	path = api-gateway
 	url = https://github.com/MaxKostov/api-gateway.git
+[submodule "service-discovery"]
+	path = service-discovery
+	url = https://github.com/MaxKostov/service-discovery.git

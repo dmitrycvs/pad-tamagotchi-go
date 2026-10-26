@@ -20,6 +20,22 @@ services:
       timeout: 5s
       retries: 10
 
+  service-discovery:
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.0.0}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      PORT: 8761
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   api-gateway:
     image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
     platform: linux/amd64
@@ -45,6 +61,7 @@ services:
       WS_PUBLIC_URL_MAP: ${WS_PUBLIC_URL_MAP:-ws://localhost:8085}
       WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8086}
       WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8087}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8080:8080"
@@ -64,6 +81,7 @@ services:
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8081:8080"
@@ -86,6 +104,7 @@ services:
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8082:8080"
@@ -108,6 +127,7 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8083:8080"
@@ -129,6 +149,7 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
       FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8084:8080"
@@ -150,6 +171,7 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PROXIMITY_THRESHOLD_METERS: ${PROXIMITY_THRESHOLD_METERS:-6}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8085:8080"
@@ -172,6 +194,7 @@ services:
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
       PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8086:8080"
@@ -192,6 +215,7 @@ services:
       API_GATEWAY_URL: http://api-gateway:8080
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8087:8080"
@@ -211,6 +235,7 @@ services:
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8088:8080"

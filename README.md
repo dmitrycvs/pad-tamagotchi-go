@@ -1456,8 +1456,8 @@ Any endpoint can additionally return the errors below. Each carries the header `
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **4 GB** of free RAM — ten containers: the gateway, eight services and PostgreSQL
-- Ports **5432** and **8080–8088** free on the host
+- Roughly **4 GB** of free RAM — eleven containers: the gateway, Service Discovery, eight services and PostgreSQL
+- Ports **5432**, **8080–8088** and **8761** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1498,6 +1498,7 @@ matching `TAG_*` to `dev` in `.env`.
 | Monster Raid          | `takima/pad-monster-raid-service:2.0.2`     | 8086           |
 | Guild                 | `maxkostov/guild-service:2.0.0`             | 8087           |
 | Package Registry      | `maxkostov/package-registry-service:2.0.0`  | 8088           |
+| **Service Discovery** | `maxkostov/service-discovery:3.0.0`         | **8761** |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -1505,6 +1506,32 @@ and only the gateway addresses services directly by name (e.g.
 `http://tamagotchi-service:8080`). The services' own host ports stay open for the
 direct WebSocket connections handed out by `POST /api/realtime/...`, and for
 debugging.
+
+### Service Discovery (Lab 3)
+
+[Service Discovery](./service-discovery/) is a REST registry of running service
+instances, reachable at `http://localhost:8761` from the host and at
+`http://service-discovery:8761` inside the stack. Every container gets
+`SERVICE_DISCOVERY_URL`, and a service that implements the
+[shared registration contract](./service-discovery/README.md#shared-contract-for-every-service)
+registers on startup, sends a heartbeat every 10 s and deregisters on shutdown.
+It registers under its Compose service name, using its container hostname as the
+instance id, so replicas never collide.
+
+The gateway reloads the instance list every 5 s and sends each request to the
+next instance of the owning service, round-robin. A service that has never
+registered keeps being reached through its static URL, so each owner can adopt
+registration on their own schedule. A service whose instances have all left gets
+**503** from the gateway.
+
+```bash
+curl http://localhost:8761/api/registry/services   # every service and its instances
+curl http://localhost:8761/health                  # the registry's own status
+```
+
+Every service's `GET /health` returns the same shape
+(`status`, `service`, `instance_id`, `uptime_seconds`, `in_flight`,
+`max_concurrent`), which Service Discovery will use for load alerts.
 
 ### Guild and Package Registry Services
 
@@ -1568,7 +1595,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix        | Purpose                                | Example                                     |

@@ -23,7 +23,7 @@ type/service-name/ShortDescription
 | Part | Allowed values |
 |------|----------------|
 | `type` | `feat`, `fix`, `hotfix`, `refactor`, `docs`, `chore`, `test` |
-| `service-name` | `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, or `shared` for cross-cutting work (compose, Postman, README, submodule bumps) |
+| `service-name` | `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, or `shared` for cross-cutting work (compose, Postman, README, submodule bumps) |
 | `ShortDescription` | Short PascalCase summary in the present tense (kebab-case also allowed) |
 
 | Prefix | Purpose | Example |

@@ -1498,7 +1498,7 @@ matching `TAG_*` to `dev` in `.env`.
 | Monster Raid          | `takima/pad-monster-raid-service:2.1.0`     | 8088–8090      |
 | Guild                 | `maxkostov/guild-service:2.0.0`             | 8091–8093      |
 | Package Registry      | `maxkostov/package-registry-service:2.0.0`  | —              |
-| **Service Discovery** | `maxkostov/service-discovery:3.0.0`         | **8761** |
+| **Service Discovery** | `maxkostov/service-discovery:3.1.0`         | **8761** |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,

@@ -21,7 +21,7 @@ services:
       retries: 10
 
   service-discovery:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.1.0}
     platform: linux/amd64
     restart: unless-stopped
     environment:

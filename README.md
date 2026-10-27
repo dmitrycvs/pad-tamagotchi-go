@@ -1758,6 +1758,6 @@ docker compose pull api-gateway guild-service package-registry-service
 docker compose up -d api-gateway guild-service package-registry-service
 ```
 
-REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
+REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on the Guild ports are rejected, and Package Registry publishes no host port. WebSocket chat uses ports 8091–8093, one per Guild replica. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
 
 Both services expose `/health`, return 503 with `Retry-After: 1` when their concurrency limit is reached, and return 504 when their own request deadline expires. Their Lab 2 release workflows publish the version in `VERSION` and `latest` after a merge to `main`.

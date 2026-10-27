@@ -1456,8 +1456,8 @@ Any endpoint can additionally return the errors below. Each carries the header `
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **4 GB** of free RAM — eleven containers: the gateway, Service Discovery, eight services and PostgreSQL
-- Ports **5432**, **8080–8088** and **8761** free on the host
+- Roughly **6 GB** of free RAM — nineteen containers by default: the gateway, Service Discovery, two replicas of each of the eight services and PostgreSQL
+- Ports **5432**, **8080**, **8082–8093** and **8761** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1490,22 +1490,24 @@ matching `TAG_*` to `dev` in `.env`.
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
 | **API Gateway** | `dmitrycvs/api-gateway:2.0.1`               | **8080** |
-| User Management       | `filipel2004/user-management-service:2.0.1` | 8081           |
-| Battle                | `filipel2004/battle-service:2.0.1`          | 8082           |
-| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.0.1`        | 8083           |
-| Notification          | `dmitrycvs/notification-service:2.0.1`      | 8084           |
-| Map                   | `takima/pad-map-service:2.0.2`              | 8085           |
-| Monster Raid          | `takima/pad-monster-raid-service:2.0.2`     | 8086           |
-| Guild                 | `maxkostov/guild-service:2.0.0`             | 8087           |
-| Package Registry      | `maxkostov/package-registry-service:2.0.0`  | 8088           |
-| **Service Discovery** | `maxkostov/service-discovery:3.0.0`         | **8761** |
+| User Management       | `filipel2004/user-management-service:2.0.1` | —              |
+| Battle                | `filipel2004/battle-service:2.0.1`          | 8082–8084      |
+| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.0.1`        | —              |
+| Notification          | `dmitrycvs/notification-service:2.0.1`      | —              |
+| Map                   | `takima/pad-map-service:2.1.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.1.0`     | 8088–8090      |
+| Guild                 | `maxkostov/guild-service:2.0.0`             | 8091–8093      |
+| Package Registry      | `maxkostov/package-registry-service:2.0.0`  | —              |
+| **Service Discovery** | `maxkostov/service-discovery:3.1.0`         | **8761** |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
 and only the gateway addresses services directly by name (e.g.
-`http://tamagotchi-service:8080`). The services' own host ports stay open for the
-direct WebSocket connections handed out by `POST /api/realtime/...`, and for
-debugging.
+`http://tamagotchi-service:8080`). Business services run as several replicas
+(see [Scaling](#scaling-lab-3)), so they publish no fixed host port. The four
+services with WebSockets publish one host port per replica from a range of three,
+for the direct connections handed out by `POST /api/realtime/...`; the
+`WS_PUBLIC_URL_*` defaults point at the first port of each range.
 
 ### Service Discovery (Lab 3)
 
@@ -1533,18 +1535,67 @@ Every service's `GET /health` returns the same shape
 (`status`, `service`, `instance_id`, `uptime_seconds`, `in_flight`,
 `max_concurrent`), which Service Discovery will use for load alerts.
 
+An instance that stops sending heartbeats (a container killed or crashed without
+deregistering) is removed after `HEARTBEAT_TIMEOUT`, 30 s by default, which is
+three missed heartbeats. The registry logs each removal with the service, the
+instance and the seconds since its last heartbeat.
+
+### Scaling (Lab 3)
+
+Every business service runs as **two replicas** by default. Each replica registers
+under its own container id, and the gateway sends each request to the next
+registered instance of the owning service. The gateway (8080), Service Discovery
+(8761) and PostgreSQL stay single.
+
+**Scale up or down** without editing any file:
+
+```bash
+docker compose up -d --scale map-service=3 --scale monster-raid-service=3
+docker compose up -d --scale map-service=1
+```
+
+Or set `REPLICAS_<SERVICE>` in `.env` (e.g. `REPLICAS_MAP=3`) and run
+`docker compose up -d`. Battle, Map, Monster Raid and Guild take at most **3**
+replicas, one per port in their host port range; the other services have no
+limit.
+
+**Watch the registry** while you scale:
+
+```bash
+curl -s http://localhost:8761/api/registry/services                          # every service and instance
+curl -s http://localhost:8761/api/registry/services/map-service/instances    # one service
+docker compose ps map-service                                               # container ids = instance ids
+```
+
+New replicas appear within a few seconds of starting. A replica removed with
+`--scale` deregisters on shutdown and disappears at once; one killed with
+`docker kill` disappears within about 35 s.
+
+**See the gateway rotate**: send the same request a few times and follow the
+gateway log. Each line names the instance chosen and its place in the rotation:
+
+```bash
+docker compose logs -f api-gateway | grep Routing
+# Routing GET /api/raids route=monster-raid service=monster-raid-service instance=3f2a9c1d7b4e address=3f2a9c1d7b4e:8080 choice=1/2
+# Routing GET /api/raids route=monster-raid service=monster-raid-service instance=9b1e2c3d4f5a address=9b1e2c3d4f5a:8080 choice=2/2
+```
+
+Each service also logs every request with its `request_id`, so
+`docker compose logs monster-raid-service` shows the requests alternating
+between the two container prefixes.
+
 ### Guild and Package Registry Services
 
 | Service                  | Host port | Container port | Database         |
 | ------------------------ | --------: | -------------: | ---------------- |
-| Guild Service            |      8087 |           8080 | guild            |
-| Package Registry Service |      8088 |           8080 | package_registry |
+| Guild Service            | 8091–8093 |           8080 | guild            |
+| Package Registry Service |         — |           8080 | package_registry |
 
-Guild Service is available from the host at `http://localhost:8087`, and Package
-Registry Service is available at `http://localhost:8088`. Inside the Docker
-network, both services listen on port `8080`: `8087:8080` means host port 8087
-→ container port 8080, while `8088:8080` means host port 8088 → container
-port 8080.
+Both services run as several replicas and are reached through the gateway at
+`http://localhost:8080`. Inside the Docker network, every replica listens on
+port `8080`. Guild Service also publishes one host port per replica, from
+8091 to 8093, for direct chat WebSocket connections; Package Registry
+Service publishes none.
 
 Source and service-specific startup instructions:
 
@@ -1707,6 +1758,6 @@ docker compose pull api-gateway guild-service package-registry-service
 docker compose up -d api-gateway guild-service package-registry-service
 ```
 
-REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
+REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on the Guild ports are rejected, and Package Registry publishes no host port. WebSocket chat uses ports 8091–8093, one per Guild replica. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
 
 Both services expose `/health`, return 503 with `Retry-After: 1` when their concurrency limit is reached, and return 504 when their own request deadline expires. Their Lab 2 release workflows publish the version in `VERSION` and `latest` after a merge to `main`.

@@ -229,7 +229,7 @@
   "variable": [
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },
-    { "key": "service_base_url", "value": "http://localhost:8085", "type": "string", "description": "Direct service URL for health checks only." },
+    { "key": "service_base_url", "value": "http://localhost:8085", "type": "string", "description": "Direct service URL for health checks only (first replica)." },
     { "key": "base_url", "value": "http://localhost:8080", "type": "string" },
     { "key": "jwt", "value": "", "type": "string", "description": "User JWT; keep empty in exported collection." },
     { "key": "service_jwt", "value": "", "type": "string", "description": "Service-to-service JWT; keep empty in exported collection." },

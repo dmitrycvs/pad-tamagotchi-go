@@ -10,14 +10,14 @@
       "name": "Reference",
       "item": [
         {
-          "name": "Health",
+          "name": "Registered Instances",
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"Status is 200 OK\", () => pm.response.to.have.status(200));", "pm.test(\"Response is JSON\", () => pm.response.to.be.json);"] } }],
           "request": {
             "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{service_base_url}}/health", "host": ["{{service_base_url}}"], "path": ["health"] },
-            "description": "Health endpoint supplied by the service owner. Only status and JSON are asserted because the private implementation is unavailable."
+            "url": { "raw": "{{service_base_url}}/api/registry/services/tamagotchi-service/instances", "host": ["{{service_base_url}}"], "path": ["api", "registry", "services", "tamagotchi-service", "instances"] },
+            "description": "The service runs as several replicas with no host port, so this asks Service Discovery for its registered instances. Only status and JSON are asserted."
           },
           "response": [{ "name": "200 OK", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"service\": \"tamagotchi-service\",\n  \"status\": \"ok\"\n}" }]
         },
@@ -162,7 +162,7 @@
   "variable": [
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },
-    { "key": "service_base_url", "value": "http://localhost:8083", "type": "string", "description": "Direct service URL for health checks only." },
+    { "key": "service_base_url", "value": "http://localhost:8761", "type": "string", "description": "Service Discovery URL; the service itself publishes no host port." },
     { "key": "base_url", "value": "http://localhost:8080", "type": "string" },
     { "key": "jwt", "value": "", "type": "string", "description": "JWT for owner_id; keep empty in the exported collection." },
     { "key": "service_jwt", "value": "", "type": "string", "description": "Keep empty in the exported collection." },

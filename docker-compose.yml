@@ -158,7 +158,7 @@ services:
       replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.0.2}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -183,7 +183,7 @@ services:
       - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.0.2}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

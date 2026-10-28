@@ -21,10 +21,15 @@ services:
       retries: 10
 
   service-discovery:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.1.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
     environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
+      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
+      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
+      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
       PORT: 8761
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
     ports:
@@ -37,10 +42,15 @@ services:
       start_period: 30s
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.1.0}
     platform: linux/amd64
     restart: unless-stopped
     environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
+      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
+      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
+      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
@@ -209,13 +219,16 @@ services:
       - "8088-8090:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
+      CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
@@ -233,13 +246,16 @@ services:
       - "8091-8093:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
+      CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}

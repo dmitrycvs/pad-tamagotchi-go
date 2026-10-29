@@ -1508,8 +1508,8 @@ matching `TAG_*` to `dev` in `.env`.
 | **API Gateway** | `dmitrycvs/api-gateway:3.0.0`               | **8080** |
 | User Management       | `filipel2004/user-management-service:3.0.0` | —              |
 | Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
-| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.1.0`        | —              |
-| Notification          | `dmitrycvs/notification-service:2.1.0`      | —              |
+| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.2.0`        | —              |
+| Notification          | `dmitrycvs/notification-service:2.2.0`      | —              |
 | Map                   | `takima/pad-map-service:2.1.0`              | 8085–8087      |
 | Monster Raid          | `takima/pad-monster-raid-service:2.1.0`     | 8088–8090      |
 | Guild                 | `maxkostov/guild-service:3.0.0`             | 8091–8093      |
@@ -1655,8 +1655,8 @@ implementation is a small purpose-built state machine (about 100 lines):
 | --- | --- | --- | --- |
 | API Gateway | Cvasiuc Dmitrii | done | [`resilience/`](./api-gateway/src/main/java/com/tamagotchigo/gateway/resilience) |
 | User Management, Battle | Obrijan Filip | done | `Services/CircuitBreaker.cs` in each ([User Management](./user-management-service/Services/CircuitBreaker.cs), [Battle](./battle-service/Services/CircuitBreaker.cs)) |
-| Tamagotchi, Notification | Cvasiuc Dmitrii | to do | |
-| Guild, Package Registry | Costov Maxim | to do | |
+| Tamagotchi, Notification | Cvasiuc Dmitrii | done | `internal/breaker` in each ([Tamagotchi](./tamagotchi-service/internal/breaker), [Notification](./notification-service/internal/breaker)); since 2.2.0 |
+| Guild, Package Registry | Costov Maxim | done | `internal/platform` in each service |
 | Map, Monster Raid | Tatarintev Denis | to do | |
 
 For a Go service, wrap the `http.Client`'s `Transport` in a `RoundTripper`
@@ -1866,64 +1866,6 @@ The CPR is additionally tagged at each lab milestone (`v1.0-lab1`, `v2.0-lab2`, 
 6. **Review** — address feedback and obtain the required approvals.
 7. **Merge** — squash and merge; delete the branch.
 8. **Release** — merge `develop` into `main` and tag before each lab presentation.
-
-### Circuit breaker
-
-**Every component that calls another service follows this rule** (Lab 3): the
-gateway for each upstream, and each service for each peer it calls. One
-breaker guards one target, so a failing target never blocks calls to the
-others.
-
-| | Rule |
-| --- | --- |
-| **Target** | The gateway keeps one breaker per upstream **instance** (`host:port`), plus one per static URL for services that do not register. A service keeps one breaker per **peer service** it calls (e.g. `tamagotchi-service`); its calls all go through the gateway, so the peer is the target. |
-| **Failure** | The call **times out**, has a **connection error** (refused, unknown host, reset), or gets a **5xx** response. A 4xx is the caller's problem and is not counted. |
-| **Trip** | **3 failures within the caller's request timeout x 3.5**: 8 s x 3.5 = **28 s** for the services, 10 s x 3.5 = **35 s** for the gateway. Successes in between do not reset the count. |
-| **On trip** | Log at **ERROR** with the target, the endpoint, the error count and the window (format below). |
-| **Open** | **Fail fast** for a cooldown (default: the window): no call is made, and the caller answers `503 { "error": "Upstream service unavailable." }`. The gateway first tries the other instances of the service and only answers 503 when every instance's breaker is open. |
-| **Half-open** | After the cooldown, **one probe call** goes through. Success closes the breaker; failure opens it again for another cooldown. |
-| **Not covered** | Calls to Service Discovery itself: the registration contract already retries them with backoff. |
-
-Use the same log keys in every language, so one `grep` finds every trip in the
-stack (`docker compose logs | grep "Circuit breaker opened"`):
-
-```text
-WARN  Upstream call failed target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types error="status 503" errors=2/3 window=28s
-ERROR Circuit breaker opened target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types errors=3 window=28s cooldown=28s last_error="status 503"
-WARN  Circuit open, failing fast target=tamagotchi-service address=api-gateway:8080 endpoint=POST /api/tamagotchis/{id}/xp
-INFO  Circuit breaker half-open target=tamagotchi-service address=api-gateway:8080 rejected_while_open=5 next=one_probe_call
-INFO  Circuit breaker closed target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types reason=probe_succeeded
-ERROR Circuit breaker re-opened target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types reason=probe_failed error="..." cooldown=28s
-```
-
-The gateway adds `instance=<instance_id>` after `target`.
-
-Settings (environment variables, optional): `CIRCUIT_BREAKER_FAILURE_THRESHOLD`
-(3), `CIRCUIT_BREAKER_WINDOW_SECONDS` (request timeout x 3.5) and
-`CIRCUIT_BREAKER_COOLDOWN_SECONDS` (the window); the gateway uses
-`CIRCUIT_BREAKER_WINDOW` and `CIRCUIT_BREAKER_COOLDOWN` as durations (`35s`).
-
-Ready-made breakers such as Resilience4j, Polly and gobreaker trip on a failure
-*ratio* or on *consecutive* failures, so three failures among many successes
-would never trip them. The rule counts failures in a time window, so each
-implementation is a small purpose-built state machine (about 100 lines):
-
-| Component | Owner | Status | Implementation |
-| --- | --- | --- | --- |
-| API Gateway | Cvasiuc Dmitrii | done | [`resilience/`](./api-gateway/src/main/java/com/tamagotchigo/gateway/resilience) |
-| User Management, Battle | Obrijan Filip | done | `Services/CircuitBreaker.cs` in each ([User Management](./user-management-service/Services/CircuitBreaker.cs), [Battle](./battle-service/Services/CircuitBreaker.cs)) |
-| Tamagotchi, Notification | Cvasiuc Dmitrii | to do | |
-| Guild, Package Registry | Costov Maxim | implemented in this slice | `internal/platform` in each service |
-| Map, Monster Raid | Tatarintev Denis | to do | |
-
-For a Go service, wrap the `http.Client`'s `Transport` in a `RoundTripper`
-that holds one breaker per peer:
-
-1. Call `tryAcquire()`; when it says no, return an error without calling, and answer 503.
-2. Otherwise send the request and call `onFailure` for an error or a status of 500 or higher, and `onSuccess` for anything else.
-3. A request that was cancelled because the incoming request went away counts as neither, but must free the half-open probe.
-
-The C# `CircuitBreaker` class is the shortest reference to port.
 
 ### Gateway authentication for Guild and Package Registry
 

@@ -20,11 +20,20 @@ A successful run has 18 requests and 30 passing assertions. It checks gateway
 routing and authentication, but not a complete battle, raid participation, or
 Firebase push delivery.
 
-For individual endpoints, the nine detailed collections are in
-[services/](./services). Import only the service you want to inspect. Their REST
-requests use the gateway at port 8080; direct ports are used for service health
-checks and the Guild WebSocket. Most detailed collections generate test JWTs and
-need the local `tamagotchi.local.postman_environment.json` selected in Postman.
+For individual endpoints, the ten detailed collections are in
+[services/](./services): one per business service, the API Gateway, and
+**Service Discovery**. Import only the one you want to inspect. Their REST
+requests use the gateway at port 8080, and the Service Discovery collection uses
+port 8761.
+
+Every collection starts with **Health (every replica)**. Since the Lab 3 scaling,
+replicas have no fixed host ports. This request shows the latest `/health`
+result of each replica, which Service Discovery polls every 15 s. Public
+requests, such as these health checks, the gateway's `/health` and the whole
+Service Discovery collection, need no environment.
+
+Requests that send a JWT generate it from the local
+`tamagotchi.local.postman_environment.json`, which must be selected in Postman.
 That ignored file must contain `jwt_secret` and `service_jwt_secret` matching
 `.env`. Some requests need package, monster, Tamagotchi, guild, or battle records
 created first.

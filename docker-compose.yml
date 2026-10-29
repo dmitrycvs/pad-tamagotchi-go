@@ -1,6 +1,15 @@
 name: tamagotchi-go
 
 services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   postgres:
     image: postgis/postgis:16-3.4
     container_name: tamagotchi-go-postgres
@@ -20,12 +29,37 @@ services:
       timeout: 5s
       retries: 10
 
-  api-gateway:
-    build: ./api-gateway
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.0.1}
+  service-discovery:
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
     environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
+      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
+      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
+      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
+      PORT: 8761
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  api-gateway:
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.0.0}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
+      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
+      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
+      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
@@ -44,14 +78,16 @@ services:
       # Handed to clients by POST /api/realtime/...: they connect to these directly.
       WS_PUBLIC_URL_BATTLE: ${WS_PUBLIC_URL_BATTLE:-ws://localhost:8082}
       WS_PUBLIC_URL_MAP: ${WS_PUBLIC_URL_MAP:-ws://localhost:8085}
-      WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8086}
-      WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8087}
+      WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8088}
+      WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8091}
+      WS_PUBLIC_INSTANCE_URLS: '${WS_PUBLIC_INSTANCE_URLS:-{}}'
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8080:8080"
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-2.0.1}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -65,12 +101,13 @@ services:
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
-    ports:
-      - "8081:8080"
+    deploy:
+      replicas: ${REPLICAS_USER_MANAGEMENT:-2}
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-2.0.1}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -87,12 +124,16 @@ services:
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+    deploy:
+      replicas: ${REPLICAS_BATTLE:-2}
+    # One host port per replica (up to 3) for direct WebSocket connections.
     ports:
-      - "8082:8080"
+      - "8082-8084:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.0.1}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -109,12 +150,13 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
-    ports:
-      - "8083:8080"
+    deploy:
+      replicas: ${REPLICAS_TAMAGOTCHI:-2}
 
   notification-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-2.0.1}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-2.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -130,12 +172,13 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
       FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
-    ports:
-      - "8084:8080"
+    deploy:
+      replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.0.2}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -151,12 +194,16 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
       PROXIMITY_THRESHOLD_METERS: ${PROXIMITY_THRESHOLD_METERS:-6}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+    deploy:
+      replicas: ${REPLICAS_MAP:-2}
+    # One host port per replica (up to 3) for direct WebSocket connections.
     ports:
-      - "8085:8080"
+      - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.0.2}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -173,19 +220,27 @@ services:
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
       PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+    deploy:
+      replicas: ${REPLICAS_MONSTER_RAID:-2}
+    # One host port per replica (up to 3) for direct WebSocket connections.
     ports:
-      - "8086:8080"
+      - "8088-8090:8080"
 
   guild-service:
-    build: ./guild-service
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
+      CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GUILD_REDIS_CHANNEL: ${GUILD_REDIS_CHANNEL:-tamagotchi:guild:events}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
@@ -194,19 +249,25 @@ services:
       API_GATEWAY_URL: http://api-gateway:8080
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+    deploy:
+      replicas: ${REPLICAS_GUILD:-2}
+    # One host port per replica (up to 3) for direct WebSocket connections.
     ports:
-      - "8087:8080"
+      - "8091-8093:8080"
 
   package-registry-service:
-    build: ./package-registry
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
+      CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
@@ -214,9 +275,10 @@ services:
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
       TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
-    ports:
-      - "8088:8080"
+    deploy:
+      replicas: ${REPLICAS_PACKAGE_REGISTRY:-2}
 
 volumes:
   postgres-data:

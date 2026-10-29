@@ -1430,6 +1430,22 @@ Success (200 OK):
 
 `token` is a short-lived ticket: the caller's own JWT claims, re-signed with the same secret and an expiry of 60 seconds. Services validate it exactly like a login token.
 
+With Service Discovery enabled, the response also includes `instance_id`. Set
+`WS_PUBLIC_INSTANCE_URLS` to a JSON map of registered IDs to distinct public
+WebSocket base URLs. The gateway returns the selected instance's address; it
+never guesses a published port from an internal container address. Guild clients
+can use any registered, mapped replica with a closed breaker because Guild events
+are distributed through Redis. Other stateful realtime channels with multiple
+instances require `?instance_id=<owner>`: retain the `X-Upstream-Instance` header
+from the REST response that created or established the session and reuse it for
+reconnects. A missing owner is 400; an unknown, removed, unmapped or unavailable
+owner is 503, without moving the socket to another instance. Session recovery
+inside Battle/Map/Raid remains the owning service's responsibility.
+
+Without discovery, the existing single-instance `WS_PUBLIC_URL_*` settings apply.
+See the [Gateway contract](./api-gateway/README.md#public-instance-addresses-and-session-ownership)
+for configuration and error details.
+
 Error (404 Not Found):
 
 ```json
@@ -1490,8 +1506,8 @@ matching `TAG_*` to `dev` in `.env`.
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
 | **API Gateway** | `dmitrycvs/api-gateway:2.1.0`               | **8080** |
-| User Management       | `filipel2004/user-management-service:2.0.1` | —              |
-| Battle                | `filipel2004/battle-service:2.0.1`          | 8082–8084      |
+| User Management       | `filipel2004/user-management-service:3.0.0` | —              |
+| Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:2.0.1`        | —              |
 | Notification          | `dmitrycvs/notification-service:2.0.1`      | —              |
 | Map                   | `takima/pad-map-service:2.1.0`              | 8085–8087      |
@@ -1653,6 +1669,46 @@ that holds one breaker per peer:
 The C# `CircuitBreaker` class is the shortest reference to port.
 
 ### Guild and Package Registry Services
+
+Guild's replicated chat uses Redis Pub/Sub (`REDIS_URL`, `GUILD_REDIS_CHANNEL`).
+Messages and membership events enter a PostgreSQL outbox in the same transaction
+as the business change; workers publish with retries. Replicas and clients can
+deduplicate the additive `event_id` frame field. Redis Pub/Sub provides live
+fan-out, not replay: after a subscription gap, sockets close and clients reload
+persisted history on reconnect. PostgreSQL stores only Guild's own data; teammate
+service repositories and databases are not required.
+
+To validate Guild and Gateway from local sources without any teammate source
+repositories, use the isolated stack:
+
+```sh
+docker compose -f compose.realtime.yml up -d --build --wait
+node scripts/realtime-smoke.mjs --check-redis-recovery
+```
+
+It starts Gateway on `localhost:18080`, Discovery on `localhost:18761`, two Guild
+replicas on `localhost:18091` and `localhost:18092`, plus isolated PostgreSQL and
+Redis. It uses explicit development-only credentials and mock User/Notification
+clients; no Firebase or Discord messages are sent. Existing production image tags
+in `docker-compose.yml` are not replaced by these local builds.
+The smoke script requires Node 22+, creates an isolated test guild, connects via
+both negotiated public URLs, exchanges messages in both directions and checks
+history. Its optional recovery flag kills only Pub/Sub connections in this
+isolated stack's Redis, then verifies socket closure, reconnect and history.
+
+For the main stack, once updated images are available, derive the public URL map
+from actual container hostnames and published ports:
+
+```sh
+export WS_PUBLIC_INSTANCE_URLS="$(python3 scripts/realtime-instance-urls.py)"
+docker compose up -d api-gateway
+```
+
+The helper accepts `-f`, `--project-name`, repeated `--service`, and
+`--public-host` options. For the isolated stack use `-f compose.realtime.yml
+--service guild-a --service guild-b`. Regenerate the map and reload Gateway after
+scaling/replacing containers. Instance IDs must agree with the hostname used for
+registration; custom `INSTANCE_ID` deployments must supply their own matching map.
 
 | Service                  | Host port | Container port | Database         |
 | ------------------------ | --------: | -------------: | ---------------- |

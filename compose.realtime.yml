@@ -1,0 +1,67 @@
+# Isolated Guild/Gateway development stack; no teammate source repositories needed.
+name: pad-realtime-dev
+
+x-guild: &guild
+  build: ./guild-service
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  environment: &guild-env
+    PORT: 8080
+    DATABASE_URL: postgres://test:test@postgres:5432/guild?sslmode=disable
+    REDIS_URL: redis://redis:6379/0
+    GUILD_REDIS_CHANNEL: tamagotchi:realtime-dev:guild:events
+    GATEWAY_SHARED_SECRET: development-gateway-shared-secret
+    SERVICE_JWT_SECRET: development-service-secret-with-32-characters
+    API_GATEWAY_URL: http://api-gateway:8080
+    SERVICE_DISCOVERY_URL: http://service-discovery:8761
+    USER_MANAGEMENT_SERVICE_URL: ""
+    NOTIFICATION_SERVICE_URL: ""
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: guild
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d guild"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  service-discovery:
+    build: ./service-discovery
+    ports: ["127.0.0.1:18761:8761"]
+
+  api-gateway:
+    build: ./api-gateway
+    environment:
+      JWT_SECRET: development-user-secret-with-at-least-32-characters
+      SERVICE_JWT_SECRET: development-service-secret-with-32-characters
+      GATEWAY_SHARED_SECRET: development-gateway-shared-secret
+      SERVICE_DISCOVERY_URL: http://service-discovery:8761
+      # The route hostname is the registry service_name, not a replica hostname.
+      UPSTREAM_GUILD_URL: http://guild-service:8080
+      WS_PUBLIC_INSTANCE_URLS: '{"guild-a":"ws://localhost:18091","guild-b":"ws://localhost:18092"}'
+    ports: ["127.0.0.1:18080:8080"]
+
+  guild-a:
+    <<: *guild
+    hostname: guild-a
+    ports: ["127.0.0.1:18091:8080"]
+  guild-b:
+    <<: *guild
+    hostname: guild-b
+    ports: ["127.0.0.1:18092:8080"]

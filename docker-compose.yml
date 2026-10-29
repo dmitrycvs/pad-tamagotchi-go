@@ -1,6 +1,15 @@
 name: tamagotchi-go
 
 services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   postgres:
     image: postgis/postgis:16-3.4
     container_name: tamagotchi-go-postgres
@@ -71,13 +80,14 @@ services:
       WS_PUBLIC_URL_MAP: ${WS_PUBLIC_URL_MAP:-ws://localhost:8085}
       WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8088}
       WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8091}
+      WS_PUBLIC_INSTANCE_URLS: '${WS_PUBLIC_INSTANCE_URLS:-{}}'
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
       - "8080:8080"
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-2.0.1}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -97,7 +107,7 @@ services:
       replicas: ${REPLICAS_USER_MANAGEMENT:-2}
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-2.0.1}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -229,6 +239,8 @@ services:
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
       CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
       CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GUILD_REDIS_CHANNEL: ${GUILD_REDIS_CHANNEL:-tamagotchi:guild:events}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}

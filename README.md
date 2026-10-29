@@ -1510,8 +1510,8 @@ matching `TAG_*` to `dev` in `.env`.
 | Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:2.2.0`        | —              |
 | Notification          | `dmitrycvs/notification-service:2.2.0`      | —              |
-| Map                   | `takima/pad-map-service:2.1.0`              | 8085–8087      |
-| Monster Raid          | `takima/pad-monster-raid-service:2.1.0`     | 8088–8090      |
+| Map                   | `takima/pad-map-service:2.2.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.2.0`     | 8088–8090      |
 | Guild                 | `maxkostov/guild-service:3.0.0`             | 8091–8093      |
 | Package Registry      | `maxkostov/package-registry-service:3.0.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.3.0`         | **8761** |
@@ -1657,7 +1657,7 @@ implementation is a small purpose-built state machine (about 100 lines):
 | User Management, Battle | Obrijan Filip | done | `Services/CircuitBreaker.cs` in each ([User Management](./user-management-service/Services/CircuitBreaker.cs), [Battle](./battle-service/Services/CircuitBreaker.cs)) |
 | Tamagotchi, Notification | Cvasiuc Dmitrii | done | `internal/breaker` in each ([Tamagotchi](./tamagotchi-service/internal/breaker), [Notification](./notification-service/internal/breaker)); since 2.2.0 |
 | Guild, Package Registry | Costov Maxim | done | `internal/platform` in each service |
-| Map, Monster Raid | Tatarintev Denis | to do | |
+| Map, Monster Raid | Tatarintev Denis | done | `CircuitBreaker.cs` in each ([Map](./pad-map-service/CircuitBreaker.cs), [Monster Raid](./pad-monster-raid-service/CircuitBreaker.cs)) |
 
 For a Go service, wrap the `http.Client`'s `Transport` in a `RoundTripper`
 that holds one breaker per peer:

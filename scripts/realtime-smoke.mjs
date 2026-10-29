@@ -1,14 +1,34 @@
-// Node 22+. Exercises only compose.realtime.yml with its development credentials.
-import { createHmac, randomUUID } from 'node:crypto';
+// Node 22+. Exercises the running main Compose stack with an existing user's JWT.
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 
-const base = process.env.REALTIME_TEST_GATEWAY_URL || 'http://localhost:18080';
-const secret = process.env.REALTIME_TEST_JWT_SECRET || 'development-user-secret-with-at-least-32-characters';
-const owner = randomUUID();
-const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
-const unsigned = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: owner, roles: ['user'], exp: Math.floor(Date.now() / 1000) + 300 })}`;
-const token = `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+const base = process.env.REALTIME_TEST_GATEWAY_URL || 'http://localhost:8080';
+const token = process.env.REALTIME_TEST_TOKEN;
+if (!token) {
+  console.error('Set REALTIME_TEST_TOKEN to a user JWT returned by POST /api/users/login.');
+  process.exit(1);
+}
+let owner;
+try {
+  owner = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).sub;
+  assert.equal(typeof owner, 'string');
+  assert.ok(owner);
+} catch {
+  console.error('REALTIME_TEST_TOKEN must contain a JWT with a user sub claim.');
+  process.exit(1);
+}
+const compose = ['compose', '-f', 'docker-compose.yml'];
+let instances;
+try {
+  const containers = execFileSync('docker', [...compose, 'ps', '-q', 'guild-service'], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean);
+  instances = containers.map(container => execFileSync('docker', ['inspect', '--format', '{{.Config.Hostname}}', container], { encoding: 'utf8' }).trim());
+  assert.ok(new Set(instances).size >= 2);
+  instances = [...new Set(instances)].slice(0, 2);
+} catch {
+  console.error('Start at least two Guild replicas with docker compose up -d and configure WS_PUBLIC_INSTANCE_URLS.');
+  process.exit(1);
+}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function request(path, body) {
@@ -73,7 +93,7 @@ try {
   const create = { name: `realtime-${randomUUID()}`, owner_id: owner, event_id: randomUUID() };
   const guild = await retry(() => request('/api/guilds', create));
   async function pair() {
-    const results = await Promise.all(['guild-a', 'guild-b'].map(instance => retry(async () => {
+    const results = await Promise.all(instances.map(instance => retry(async () => {
       const negotiation = await request(`/api/realtime/guilds/${guild.guild_id}?instance_id=${instance}`, {});
       assert.equal(negotiation.instance_id, instance);
       const socket = await connect(negotiation);
@@ -96,7 +116,7 @@ try {
   console.log('PASS: Gateway selects two distinct public endpoints; messages cross both Guild replicas; PostgreSQL history contains both messages');
 
   if (process.argv.includes('--check-redis-recovery')) {
-    execFileSync('docker', ['compose', '-f', 'compose.realtime.yml', 'exec', '-T', 'redis', 'redis-cli', 'CLIENT', 'KILL', 'TYPE', 'pubsub'], { stdio: 'pipe' });
+    execFileSync('docker', [...compose, 'exec', '-T', 'redis', 'redis-cli', 'CLIENT', 'KILL', 'TYPE', 'pubsub'], { stdio: 'pipe' });
     await Promise.all(clients.map(socket => socket.closed()));
     clients = await pair();
     await exchange(clients, 'after Redis subscription recovery');

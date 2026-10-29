@@ -1678,26 +1678,9 @@ fan-out, not replay: after a subscription gap, sockets close and clients reload
 persisted history on reconnect. PostgreSQL stores only Guild's own data; teammate
 service repositories and databases are not required.
 
-To validate Guild and Gateway from local sources without any teammate source
-repositories, use the isolated stack:
-
-```sh
-docker compose -f compose.realtime.yml up -d --build --wait
-node scripts/realtime-smoke.mjs --check-redis-recovery
-```
-
-It starts Gateway on `localhost:18080`, Discovery on `localhost:18761`, two Guild
-replicas on `localhost:18091` and `localhost:18092`, plus isolated PostgreSQL and
-Redis. It uses explicit development-only credentials and mock User/Notification
-clients; no Firebase or Discord messages are sent. Existing production image tags
-in `docker-compose.yml` are not replaced by these local builds.
-The smoke script requires Node 22+, creates an isolated test guild, connects via
-both negotiated public URLs, exchanges messages in both directions and checks
-history. Its optional recovery flag kills only Pub/Sub connections in this
-isolated stack's Redis, then verifies socket closure, reconnect and history.
-
-For the main stack, once updated images are available, derive the public URL map
-from actual container hostnames and published ports:
+Run the published service images with the main `docker-compose.yml`. No teammate
+source repositories or additional Compose files are required. Once the replicas
+are running, derive the public URL map from their hostnames and published ports:
 
 ```sh
 export WS_PUBLIC_INSTANCE_URLS="$(python3 scripts/realtime-instance-urls.py)"
@@ -1705,10 +1688,23 @@ docker compose up -d api-gateway
 ```
 
 The helper accepts `-f`, `--project-name`, repeated `--service`, and
-`--public-host` options. For the isolated stack use `-f compose.realtime.yml
---service guild-a --service guild-b`. Regenerate the map and reload Gateway after
+`--public-host` options. Regenerate the map and reload Gateway after
 scaling/replacing containers. Instance IDs must agree with the hostname used for
 registration; custom `INSTANCE_ID` deployments must supply their own matching map.
+
+To check chat on this running stack, export `REALTIME_TEST_TOKEN` with a real
+user JWT returned by `POST /api/users/login`, then run:
+
+```sh
+node scripts/realtime-smoke.mjs
+```
+
+The script requires Node 22+, creates a test guild for that user, discovers two
+running Guild replicas and checks bidirectional WebSocket delivery and persisted
+history. The test guild and messages remain in the main database. The optional
+`--check-redis-recovery` flag also disconnects all Pub/Sub clients of this stack's
+Redis to check socket closure and recovery; use it when interrupting active chat
+sessions is acceptable.
 
 | Service                  | Host port | Container port | Database         |
 | ------------------------ | --------: | -------------: | ---------------- |
@@ -1956,15 +1952,14 @@ The URL is secret and must never be committed. The optional `DISCORD_*` settings
 in `.env.example` control timeouts, deduplication, queue size and rate limiting.
 Notifications are bounded and in memory; rate limits apply per process.
 
-To run these four services from this checkout before images are published:
+Run the published service versions using the main Compose file:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.lab3.yml up -d --build service-discovery api-gateway guild-service package-registry-service
+docker compose pull
+docker compose up -d --wait
 ```
 
-The override builds local source and uses local image names. The normal Compose
-file pins the target release versions; publish those images before merging the
-CPR integration PR. Keep the `.env` image tags in
+The Compose file pins the released image versions. Keep the `.env` image tags in
 sync with the published versions after release. Watch registration and health:
 
 ```sh
@@ -1987,17 +1982,7 @@ Service Discovery's workflow requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
 repository secrets. The professor and colleagues need accepted collaborator
 invitations; pending invitations are visible in GitHub repository settings.
 
-For an isolated, reproducible integration check without the other six private
-service repositories, run:
-
-```sh
-python3 scripts/lab3-smoke.py --build
-```
-
-The script creates its own PostgreSQL, registry, gateway, Package Registry and
-two Guild replicas with test-only credentials. It checks registration, real
-health polling, authenticated gateway writes, round-robin reads on both replicas
-and graceful deregistration. Business peer clients use their existing in-process
-mocks. All test containers, anonymous volumes and the test network are removed
-in a `finally` block; existing Compose projects and real `.env` values are unused.
-Omit `--build` to reuse the four local images from an earlier source build.
+Validate registration and health in the running main stack through
+`http://localhost:8761/api/registry/services`. Check Guild chat with
+`scripts/realtime-smoke.mjs` as described above. All services run from published
+images; these checks do not build or launch a separate stack.

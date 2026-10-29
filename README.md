@@ -1430,6 +1430,22 @@ Success (200 OK):
 
 `token` is a short-lived ticket: the caller's own JWT claims, re-signed with the same secret and an expiry of 60 seconds. Services validate it exactly like a login token.
 
+With Service Discovery enabled, the response also includes `instance_id`. Set
+`WS_PUBLIC_INSTANCE_URLS` to a JSON map of registered IDs to distinct public
+WebSocket base URLs. The gateway returns the selected instance's address; it
+never guesses a published port from an internal container address. Guild clients
+can use any registered, mapped replica with a closed breaker because Guild events
+are distributed through Redis. Other stateful realtime channels with multiple
+instances require `?instance_id=<owner>`: retain the `X-Upstream-Instance` header
+from the REST response that created or established the session and reuse it for
+reconnects. A missing owner is 400; an unknown, removed, unmapped or unavailable
+owner is 503, without moving the socket to another instance. Session recovery
+inside Battle/Map/Raid remains the owning service's responsibility.
+
+Without discovery, the existing single-instance `WS_PUBLIC_URL_*` settings apply.
+See the [Gateway contract](./api-gateway/README.md#public-instance-addresses-and-session-ownership)
+for configuration and error details.
+
 Error (404 Not Found):
 
 ```json
@@ -1456,8 +1472,8 @@ Any endpoint can additionally return the errors below. Each carries the header `
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **4 GB** of free RAM — ten containers: the gateway, eight services and PostgreSQL
-- Ports **5432** and **8080–8088** free on the host
+- Roughly **6 GB** of free RAM — nineteen containers by default: the gateway, Service Discovery, two replicas of each of the eight services and PostgreSQL
+- Ports **5432**, **8080**, **8082–8093** and **8761** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1481,41 +1497,225 @@ and `docker compose down -v` discards it.
 
 ### Service Images
 
-Compose names each service image with a versioned DockerHub tag. Build locally
-with `docker compose up --build` until that version has been published. The
-DockerHub namespace per owner is set in `.env`.
+Compose always pulls each service image from DockerHub with a versioned tag; it
+never builds services locally. The DockerHub namespace per owner and the `TAG_*`
+versions are set in `.env`. To try unreleased code, build it from its submodule
+(`docker build -t <namespace>/<image>:dev ./<service-folder>`) and set the
+matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
-| **API Gateway** | `dmitrycvs/api-gateway:2.0.1`               | **8080** |
-| User Management       | `filipel2004/user-management-service:2.0.1` | 8081           |
-| Battle                | `filipel2004/battle-service:2.0.1`          | 8082           |
-| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.0.1`        | 8083           |
-| Notification          | `dmitrycvs/notification-service:2.0.1`      | 8084           |
-| Map                   | `takima/pad-map-service:2.0.2`              | 8085           |
-| Monster Raid          | `takima/pad-monster-raid-service:2.0.2`     | 8086           |
-| Guild                 | `maxkostov/guild-service:2.0.0`             | 8087           |
-| Package Registry      | `maxkostov/package-registry-service:2.0.0`  | 8088           |
+| **API Gateway** | `dmitrycvs/api-gateway:3.0.0`               | **8080** |
+| User Management       | `filipel2004/user-management-service:3.0.0` | —              |
+| Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
+| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.2.0`        | —              |
+| Notification          | `dmitrycvs/notification-service:2.2.0`      | —              |
+| Map                   | `takima/pad-map-service:2.2.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.2.0`     | 8088–8090      |
+| Guild                 | `maxkostov/guild-service:3.0.0`             | 8091–8093      |
+| Package Registry      | `maxkostov/package-registry-service:3.0.0`  | —              |
+| **Service Discovery** | `maxkostov/service-discovery:3.3.0`         | **8761** |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
 and only the gateway addresses services directly by name (e.g.
-`http://tamagotchi-service:8080`). The services' own host ports stay open for the
-direct WebSocket connections handed out by `POST /api/realtime/...`, and for
-debugging.
+`http://tamagotchi-service:8080`). Business services run as several replicas
+(see [Scaling](#scaling-lab-3)), so they publish no fixed host port. The four
+services with WebSockets publish one host port per replica from a range of three,
+for the direct connections handed out by `POST /api/realtime/...`; the
+`WS_PUBLIC_URL_*` defaults point at the first port of each range.
+
+### Service Discovery (Lab 3)
+
+[Service Discovery](./service-discovery/) is a REST registry of running service
+instances, reachable at `http://localhost:8761` from the host and at
+`http://service-discovery:8761` inside the stack. Every container gets
+`SERVICE_DISCOVERY_URL`, and a service that implements the
+[shared registration contract](./service-discovery/README.md#shared-contract-for-every-service)
+registers on startup, sends a heartbeat every 10 s and deregisters on shutdown.
+It registers under its Compose service name, using its container hostname as the
+instance id, so replicas never collide.
+
+The gateway reloads the instance list every 5 s and sends each request to the
+next instance of the owning service, round-robin. A service that has never
+registered keeps being reached through its static URL, so each owner can adopt
+registration on their own schedule. A service whose instances have all left gets
+**503** from the gateway.
+
+```bash
+curl http://localhost:8761/api/registry/services   # every service and its instances
+curl http://localhost:8761/health                  # the registry's own status
+```
+
+Every service's `GET /health` returns the same shape
+(`status`, `service`, `instance_id`, `uptime_seconds`, `in_flight`,
+`max_concurrent`). Every 15 s Service Discovery calls it on each registered
+instance and computes the load as `in_flight / max_concurrent`. It logs a WARN
+alert at 80% load and an ERROR alert at 95% or when the instance does not
+answer, once per change rather than on every poll, and an INFO line when the
+instance recovers. The latest check of each instance is listed under `health` in
+`GET /api/registry/services` (see
+[Health polling and load alerts](./service-discovery/README.md#health-polling-and-load-alerts)):
+
+```bash
+docker compose logs -f service-discovery | grep Health   # load alerts and recoveries
+```
+
+An instance that stops sending heartbeats (a container killed or crashed without
+deregistering) is removed after `HEARTBEAT_TIMEOUT`, 30 s by default, which is
+three missed heartbeats. The registry logs each removal with the service, the
+instance and the seconds since its last heartbeat.
+
+### Scaling (Lab 3)
+
+Every business service runs as **two replicas** by default. Each replica registers
+under its own container id, and the gateway sends each request to the next
+registered instance of the owning service. The gateway (8080), Service Discovery
+(8761) and PostgreSQL stay single.
+
+**Scale up or down** without editing any file:
+
+```bash
+docker compose up -d --scale map-service=3 --scale monster-raid-service=3
+docker compose up -d --scale map-service=1
+```
+
+Or set `REPLICAS_<SERVICE>` in `.env` (e.g. `REPLICAS_MAP=3`) and run
+`docker compose up -d`. Battle, Map, Monster Raid and Guild take at most **3**
+replicas, one per port in their host port range; the other services have no
+limit.
+
+**Watch the registry** while you scale:
+
+```bash
+curl -s http://localhost:8761/api/registry/services                          # every service and instance
+curl -s http://localhost:8761/api/registry/services/map-service/instances    # one service
+docker compose ps map-service                                               # container ids = instance ids
+```
+
+New replicas appear within a few seconds of starting. A replica removed with
+`--scale` deregisters on shutdown and disappears at once; one killed with
+`docker kill` disappears within about 35 s.
+
+**See the gateway rotate**: send the same request a few times and follow the
+gateway log. Each line names the instance chosen and its place in the rotation:
+
+```bash
+docker compose logs -f api-gateway | grep Routing
+# Routing GET /api/raids route=monster-raid service=monster-raid-service instance=3f2a9c1d7b4e address=3f2a9c1d7b4e:8080 choice=1/2
+# Routing GET /api/raids route=monster-raid service=monster-raid-service instance=9b1e2c3d4f5a address=9b1e2c3d4f5a:8080 choice=2/2
+```
+
+Each service also logs every request with its `request_id`, so
+`docker compose logs monster-raid-service` shows the requests alternating
+between the two container prefixes.
+
+### Circuit breaker
+
+**Every component that calls another service follows this rule** (Lab 3): the
+gateway for each upstream, and each service for each peer it calls. One
+breaker guards one target, so a failing target never blocks calls to the
+others.
+
+| | Rule |
+| --- | --- |
+| **Target** | The gateway keeps one breaker per upstream **instance** (`host:port`), plus one per static URL for services that do not register. A service keeps one breaker per **peer service** it calls (e.g. `tamagotchi-service`); its calls all go through the gateway, so the peer is the target. |
+| **Failure** | The call **times out**, has a **connection error** (refused, unknown host, reset), or gets a **5xx** response. A 4xx is the caller's problem and is not counted. |
+| **Trip** | **3 failures within the caller's request timeout x 3.5**: 8 s x 3.5 = **28 s** for the services, 10 s x 3.5 = **35 s** for the gateway. Successes in between do not reset the count. |
+| **On trip** | Log at **ERROR** with the target, the endpoint, the error count and the window (format below). |
+| **Open** | **Fail fast** for a cooldown (default: the window): no call is made, and the caller answers `503 { "error": "Upstream service unavailable." }`. The gateway first tries the other instances of the service and only answers 503 when every instance's breaker is open. |
+| **Half-open** | After the cooldown, **one probe call** goes through. Success closes the breaker; failure opens it again for another cooldown. |
+| **Not covered** | Calls to Service Discovery itself: the registration contract already retries them with backoff. |
+
+Use the same log keys in every language, so one `grep` finds every trip in the
+stack (`docker compose logs | grep "Circuit breaker opened"`):
+
+```text
+WARN  Upstream call failed target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types error="status 503" errors=2/3 window=28s
+ERROR Circuit breaker opened target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types errors=3 window=28s cooldown=28s last_error="status 503"
+WARN  Circuit open, failing fast target=tamagotchi-service address=api-gateway:8080 endpoint=POST /api/tamagotchis/{id}/xp
+INFO  Circuit breaker half-open target=tamagotchi-service address=api-gateway:8080 rejected_while_open=5 next=one_probe_call
+INFO  Circuit breaker closed target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types reason=probe_succeeded
+ERROR Circuit breaker re-opened target=tamagotchi-service address=api-gateway:8080 endpoint=GET /api/tamagotchis/types reason=probe_failed error="..." cooldown=28s
+```
+
+The gateway adds `instance=<instance_id>` after `target`.
+
+Settings (environment variables, optional): `CIRCUIT_BREAKER_FAILURE_THRESHOLD`
+(3), `CIRCUIT_BREAKER_WINDOW_SECONDS` (request timeout x 3.5) and
+`CIRCUIT_BREAKER_COOLDOWN_SECONDS` (the window); the gateway uses
+`CIRCUIT_BREAKER_WINDOW` and `CIRCUIT_BREAKER_COOLDOWN` as durations (`35s`).
+
+Ready-made breakers such as Resilience4j, Polly and gobreaker trip on a failure
+*ratio* or on *consecutive* failures, so three failures among many successes
+would never trip them. The rule counts failures in a time window, so each
+implementation is a small purpose-built state machine (about 100 lines):
+
+| Component | Owner | Status | Implementation |
+| --- | --- | --- | --- |
+| API Gateway | Cvasiuc Dmitrii | done | [`resilience/`](./api-gateway/src/main/java/com/tamagotchigo/gateway/resilience) |
+| User Management, Battle | Obrijan Filip | done | `Services/CircuitBreaker.cs` in each ([User Management](./user-management-service/Services/CircuitBreaker.cs), [Battle](./battle-service/Services/CircuitBreaker.cs)) |
+| Tamagotchi, Notification | Cvasiuc Dmitrii | done | `internal/breaker` in each ([Tamagotchi](./tamagotchi-service/internal/breaker), [Notification](./notification-service/internal/breaker)); since 2.2.0 |
+| Guild, Package Registry | Costov Maxim | done | `internal/platform` in each service |
+| Map, Monster Raid | Tatarintev Denis | done | `CircuitBreaker.cs` in each ([Map](./pad-map-service/CircuitBreaker.cs), [Monster Raid](./pad-monster-raid-service/CircuitBreaker.cs)) |
+
+For a Go service, wrap the `http.Client`'s `Transport` in a `RoundTripper`
+that holds one breaker per peer:
+
+1. Call `tryAcquire()`; when it says no, return an error without calling, and answer 503.
+2. Otherwise send the request and call `onFailure` for an error or a status of 500 or higher, and `onSuccess` for anything else.
+3. A request that was cancelled because the incoming request went away counts as neither, but must free the half-open probe.
+
+The C# `CircuitBreaker` class is the shortest reference to port.
 
 ### Guild and Package Registry Services
 
+Guild's replicated chat uses Redis Pub/Sub (`REDIS_URL`, `GUILD_REDIS_CHANNEL`).
+Messages and membership events enter a PostgreSQL outbox in the same transaction
+as the business change; workers publish with retries. Replicas and clients can
+deduplicate the additive `event_id` frame field. Redis Pub/Sub provides live
+fan-out, not replay: after a subscription gap, sockets close and clients reload
+persisted history on reconnect. PostgreSQL stores only Guild's own data; teammate
+service repositories and databases are not required.
+
+Run the published service images with the main `docker-compose.yml`. No teammate
+source repositories or additional Compose files are required. Once the replicas
+are running, derive the public URL map from their hostnames and published ports:
+
+```sh
+export WS_PUBLIC_INSTANCE_URLS="$(python3 scripts/realtime-instance-urls.py)"
+docker compose up -d api-gateway
+```
+
+The helper accepts `-f`, `--project-name`, repeated `--service`, and
+`--public-host` options. Regenerate the map and reload Gateway after
+scaling/replacing containers. Instance IDs must agree with the hostname used for
+registration; custom `INSTANCE_ID` deployments must supply their own matching map.
+
+To check chat on this running stack, export `REALTIME_TEST_TOKEN` with a real
+user JWT returned by `POST /api/users/login`, then run:
+
+```sh
+node scripts/realtime-smoke.mjs
+```
+
+The script requires Node 22+, creates a test guild for that user, discovers two
+running Guild replicas and checks bidirectional WebSocket delivery and persisted
+history. The test guild and messages remain in the main database. The optional
+`--check-redis-recovery` flag also disconnects all Pub/Sub clients of this stack's
+Redis to check socket closure and recovery; use it when interrupting active chat
+sessions is acceptable.
+
 | Service                  | Host port | Container port | Database         |
 | ------------------------ | --------: | -------------: | ---------------- |
-| Guild Service            |      8087 |           8080 | guild            |
-| Package Registry Service |      8088 |           8080 | package_registry |
+| Guild Service            | 8091–8093 |           8080 | guild            |
+| Package Registry Service |         — |           8080 | package_registry |
 
-Guild Service is available from the host at `http://localhost:8087`, and Package
-Registry Service is available at `http://localhost:8088`. Inside the Docker
-network, both services listen on port `8080`: `8087:8080` means host port 8087
-→ container port 8080, while `8088:8080` means host port 8088 → container
-port 8080.
+Both services run as several replicas and are reached through the gateway at
+`http://localhost:8080`. Inside the Docker network, every replica listens on
+port `8080`. Guild Service also publishes one host port per replica, from
+8091 to 8093, for direct chat WebSocket connections; Package Registry
+Service publishes none.
 
 Source and service-specific startup instructions:
 
@@ -1538,6 +1738,12 @@ Start with the [Postman smoke collection](./postman/lab2-smoke.postman_collectio
 send its requests in order through the gateway at port 8080. Detailed collections
 for each service live in [`postman/services/`](./postman/services); see the
 [Postman guide](./postman/README.md) for setup and expected responses.
+
+For Lab 3, run the [scaling check](./postman/lab3-scaling.postman_collection.json)
+with the Collection Runner. It checks health and registration, the registry API,
+routing through Service Discovery, round-robin, realtime routing, and the circuit
+breaker removing a failing instance. See the
+[Postman guide](./postman/README.md#lab-3-scaling-check).
 
 ---
 
@@ -1566,7 +1772,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix        | Purpose                                | Example                                     |
@@ -1671,12 +1877,60 @@ The CPR is additionally tagged at each lab milestone (`v1.0-lab1`, `v2.0-lab2`, 
 
 These services receive REST identity through trusted gateway headers and no longer validate incoming JWTs. Configure a non-empty `GATEWAY_SHARED_SECRET` in `.env` (shared by the gateway and both services). Guild also uses `API_GATEWAY_URL` for token validation before direct WebSocket connections. Business permissions remain checked by the owning service; outgoing service credentials still use `SERVICE_JWT_SECRET`.
 
-Rebuild the changed services from this checkout:
+Start them with their published images:
 
 ```sh
-docker compose up -d --build api-gateway guild-service package-registry-service
+docker compose pull api-gateway guild-service package-registry-service
+docker compose up -d api-gateway guild-service package-registry-service
 ```
 
-REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on ports 8087/8088 are rejected. WebSocket chat still uses port 8087. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
+REST calls and the Guild/Package Registry Postman collections use port 8080; direct REST calls on the Guild ports are rejected, and Package Registry publishes no host port. WebSocket chat uses ports 8091–8093, one per Guild replica. Changes inside submodules must be committed in their own repositories before updating the parent repository's submodule pointers.
 
 Both services expose `/health`, return 503 with `Retry-After: 1` when their concurrency limit is reached, and return 504 when their own request deadline expires. Their Lab 2 release workflows publish the version in `VERSION` and `latest` after a merge to `main`.
+
+## Lab 3: Maxim's implementation and release
+
+Guild and Package Registry expose the shared load fields, log requests with
+correlation ids, register and heartbeat, and protect outgoing business calls with
+the shared rolling-window breaker. Guild and Package Registry target `3.0.0`.
+Service Discovery `3.3.0` sends health transitions to Discord; Gateway `3.0.0`
+removes tripped registry instances and sends trip/removal alerts. Set
+`DISCORD_WEBHOOK_URL` in `.env` for both Java services. Empty disables delivery.
+The URL is secret and must never be committed. The optional `DISCORD_*` settings
+in `.env.example` control timeouts, deduplication, queue size and rate limiting.
+Notifications are bounded and in memory; rate limits apply per process.
+
+Run the published service versions using the main Compose file:
+
+```sh
+docker compose pull
+docker compose up -d --wait
+```
+
+The Compose file pins the released image versions. Keep the `.env` image tags in
+sync with the published versions after release. Watch registration and health:
+
+```sh
+curl http://localhost:8761/api/registry/services
+docker compose logs -f service-discovery api-gateway guild-service package-registry-service
+```
+
+A tripped gateway breaker removes that instance from its cache immediately,
+requests its deletion from the registry on a worker thread, and queues Discord
+notifications with timestamp, target, instance and outcome. Registry DELETE 404
+is idempotent success. Static upstreams are never deleted. A healthy instance
+can re-register after its next heartbeat gets 404; removal is not permanent.
+
+Release order: merge the four implementation PRs into `develop` after CI and
+required reviews, release the changed services through their `main` PRs, wait
+for versioned images to be published, then merge the CPR integration PR and the
+CPR `develop` -> `main` release PR. Create `v3.0-lab3` on that final `main` commit.
+Do not tag the earlier checkout or publish an image under an existing version.
+Service Discovery's workflow requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+repository secrets. The professor and colleagues need accepted collaborator
+invitations; pending invitations are visible in GitHub repository settings.
+
+Validate registration and health in the running main stack through
+`http://localhost:8761/api/registry/services`. Check Guild chat with
+`scripts/realtime-smoke.mjs` as described above. All services run from published
+images; these checks do not build or launch a separate stack.

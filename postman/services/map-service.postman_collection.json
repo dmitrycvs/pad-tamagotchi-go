@@ -7,6 +7,17 @@
   },
   "item": [
     {
+      "name": "Health (every replica)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));", "const instances = pm.response.json().instances || [];", "pm.test(\"At least 2 registered replica(s)\", () => pm.expect(instances.length).to.be.at.least(2));", "instances.forEach(i => {", "  pm.test(`${i.instance_id}: /health ok (load ${i.health ? i.health.load : \"?\"})`, () => {", "    pm.expect(i.health, \"not polled yet, retry in 15 s\").to.be.an(\"object\");", "    pm.expect(i.health.condition, i.health.error || \"\").to.eql(\"ok\");", "    pm.expect(i.health.max_concurrent).to.be.above(0);", "  });", "});"] } }],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{registry_url}}/api/registry/services/map-service/instances", "host": ["{{registry_url}}"], "path": ["api", "registry", "services", "map-service", "instances"] },
+        "description": "Latest GET /health result of every map-service replica. Service Discovery polls each registered instance every 15 s and keeps the result (condition, load = in_flight / max_concurrent, latency). Replicas have no fixed host ports since the Lab 3 scaling, so this shows all of them. Needs no token or environment."
+      }
+    },
+    {
       "name": "Health Check",
       "event": [
         {
@@ -205,8 +216,10 @@
       "const DEFAULT_PACKAGE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';",
       "const v = (k) => pm.variables.get(k) || \"\";",
       "// Select a local Postman environment with the signing secrets from .env.",
+      "// Requests that use none of the tokens below, such as health checks, work without them.",
+      "const needsToken = Object.keys(TOKENS).some((name) => JSON.stringify(pm.request.toJSON()).includes(\"{{\" + name + \"}}\"));",
       "for (const key of [\"jwt_secret\", \"service_jwt_secret\"]) {",
-      "  if (v(key).length < 32) {",
+      "  if (needsToken && v(key).length < 32) {",
       "    throw new Error(\"Select the local Tamagotchi environment: \" + key + \" must match .env and contain at least 32 characters.\");",
       "  }",
       "}",
@@ -227,6 +240,7 @@
       "});"
     ] } }],
   "variable": [
+    { "key": "registry_url", "value": "http://localhost:8761", "type": "string", "description": "Service Discovery, for the health checks." },
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },
     { "key": "service_base_url", "value": "http://localhost:8085", "type": "string", "description": "Direct service URL for health checks only (first replica)." },

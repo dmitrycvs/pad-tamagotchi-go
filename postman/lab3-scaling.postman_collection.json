@@ -1,0 +1,1084 @@
+{
+  "info": {
+    "_postman_id": "7365662a-e392-5c3d-857a-6cbe8dd36e5b",
+    "name": "Tamagotchi Go — Lab 3 Scaling Check",
+    "description": "Checks the Lab 3 grade points against the running Compose stack: health endpoints, registration, the registry API, routing through Service Discovery, round-robin, realtime routing, the circuit breaker removing a failing instance, and heartbeat expiry. Run the whole collection with the Collection Runner (about 1 minute). No environment or secrets needed; it signs up its own test user. Circuit-breaker trips are also logged: docker compose logs | grep \"Circuit breaker\".",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Shared helpers for the Lab 3 checks. Each takes the calling script's pm (and",
+          "// postman), because objects captured here belong to this collection-level script.",
+          "lab3 = {",
+          "  // Registry snapshot saved by \"Registry lists every service\".",
+          "  instancesOf(pm, service) {",
+          "    const snapshot = JSON.parse(pm.collectionVariables.get(\"registry_snapshot\") || \"{}\");",
+          "    return snapshot[service] || [];",
+          "  },",
+          "  // The gateway names the instance that served a request in X-Upstream-Instance.",
+          "  upstream(pm) {",
+          "    return pm.response.headers.get(\"X-Upstream-Instance\");",
+          "  },",
+          "  // Runs the current request again (Collection Runner / newman only).",
+          "  repeat(pm, postman) {",
+          "    if (pm.execution && typeof pm.execution.setNextRequest === \"function\") pm.execution.setNextRequest(pm.info.requestName);",
+          "    else postman.setNextRequest(pm.info.requestName);",
+          "  },",
+          "  expectServedBy(pm, service) {",
+          "    const id = lab3.upstream(pm);",
+          "    pm.test(`Served by a registered ${service} instance (X-Upstream-Instance)`, () => {",
+          "      pm.expect(id, \"X-Upstream-Instance header\").to.be.a(\"string\").and.not.empty;",
+          "      pm.expect(lab3.instancesOf(pm, service), `instances of ${service}`).to.include(id);",
+          "    });",
+          "  }",
+          "};"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "registry_url",
+      "value": "http://localhost:8761",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guild_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "registry_snapshot",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rr_seen",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cb_results",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "broken_registered_at",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "expiry_registered_at",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Status endpoints and registration (Grades 3-4)",
+      "description": "Every component exposes GET /health in the shared shape, and every business service runs 2 replicas that registered with Service Discovery on startup.",
+      "item": [
+        {
+          "name": "Service Discovery health",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One id per run, so repeated runs never collide.",
+                  "pm.collectionVariables.set(\"run_id\", Date.now().toString() + Math.floor(Math.random() * 1000));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const h = pm.response.json();",
+                  "pm.test(\"Shared health shape\", () => {",
+                  "  pm.expect(h.status).to.eql(\"ok\");",
+                  "  pm.expect(h.service).to.eql(\"service-discovery\");",
+                  "  [\"instance_id\", \"uptime_seconds\", \"in_flight\", \"max_concurrent\", \"registered_instances\"]",
+                  "    .forEach(k => pm.expect(h, k).to.have.property(k));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Gateway health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const h = pm.response.json();",
+                  "pm.test(\"Shared health shape\", () => {",
+                  "  pm.expect(h.status).to.eql(\"ok\");",
+                  "  pm.expect(h.service).to.eql(\"api-gateway\");",
+                  "  pm.expect(h.max_concurrent).to.be.above(0);",
+                  "  [\"instance_id\", \"uptime_seconds\", \"in_flight\"].forEach(k => pm.expect(h, k).to.have.property(k));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Registry lists every service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const services = pm.response.json().services;",
+                  "const byName = {};",
+                  "services.forEach(s => byName[s.name] = s.instances);",
+                  "const business = [\"user-management-service\", \"battle-service\", \"tamagotchi-service\", \"notification-service\", \"map-service\", \"monster-raid-service\", \"guild-service\", \"package-registry-service\"];",
+                  "",
+                  "pm.test(\"The gateway is registered\", () => pm.expect(byName[\"api-gateway\"]).to.have.length.of.at.least(1));",
+                  "business.forEach(name => {",
+                  "  const list = byName[name] || [];",
+                  "  pm.test(`${name}: at least 2 replicas registered`, () => pm.expect(list).to.have.length.of.at.least(2));",
+                  "  pm.test(`${name}: every replica has its own instance_id`, () =>",
+                  "    pm.expect(new Set(list.map(i => i.instance_id)).size).to.eql(list.length));",
+                  "});",
+                  "",
+                  "// Saved for the routing checks: service -> [instance_id]",
+                  "const snapshot = {};",
+                  "Object.keys(byName).forEach(n => snapshot[n] = byName[n].map(i => i.instance_id));",
+                  "pm.collectionVariables.set(\"registry_snapshot\", JSON.stringify(snapshot));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/services",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Every instance reports its health (polled by Service Discovery)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const instances = pm.response.json().services.flatMap(s => s.instances.map(i => ({ service: s.name, ...i })));",
+                  "const checked = instances.filter(i => i.health);",
+                  "pm.test(\"The health poller has checked the instances\", () => pm.expect(checked.length).to.be.above(0));",
+                  "checked.forEach(i => {",
+                  "  pm.test(`${i.service} ${i.instance_id}: healthy, load below critical`, () => {",
+                  "    pm.expect(i.health.condition, i.health.error || \"\").to.eql(\"ok\");",
+                  "    pm.expect(i.health.load).to.be.below(0.95);",
+                  "    pm.expect(i.health.max_concurrent).to.be.above(0);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/services",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Service Discovery registry API (Grade 4)",
+      "description": "Register, refresh, heartbeat, look up and deregister an instance, plus the documented 400 and 404 errors. Uses a probe service that no real component calls.",
+      "item": [
+        {
+          "name": "Register an instance (201)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201 Created\", () => pm.response.to.have.status(201));",
+                  "const i = pm.response.json();",
+                  "pm.test(\"Instance stored as sent\", () => {",
+                  "  pm.expect(i.service_name).to.eql(\"lab3-postman-probe\");",
+                  "  pm.expect(i.instance_id).to.eql(\"probe-\" + pm.collectionVariables.get(\"run_id\"));",
+                  "  pm.expect(i.health_path).to.eql(\"/health\");",
+                  "  pm.expect(i.url).to.match(/^http:\\/\\/probe-.*\\.invalid:8080$/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{registry_url}}/api/registry/instances",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_name\": \"lab3-postman-probe\",\n  \"instance_id\": \"probe-{{run_id}}\",\n  \"host\": \"probe-{{run_id}}.invalid\",\n  \"port\": 8080\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Register the same instance again (200, idempotent)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200 on re-registration\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{registry_url}}/api/registry/instances",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_name\": \"lab3-postman-probe\",\n  \"instance_id\": \"probe-{{run_id}}\",\n  \"host\": \"probe-{{run_id}}.invalid\",\n  \"port\": 8080\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Heartbeat (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"last_heartbeat_at updated\", () => pm.expect(pm.response.json().last_heartbeat_at).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/instances/probe-{{run_id}}/heartbeat",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Look up the service's instances (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"The probe instance is listed\", () =>",
+                  "  pm.expect(pm.response.json().instances.map(i => i.instance_id)).to.include(\"probe-\" + pm.collectionVariables.get(\"run_id\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/services/lab3-postman-probe/instances",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Invalid registration (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Error names the invalid fields\", () => {",
+                  "  const error = pm.response.json().error;",
+                  "  pm.expect(error).to.include(\"service_name\");",
+                  "  pm.expect(error).to.include(\"port\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{registry_url}}/api/registry/instances",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_name\": \"\",\n  \"instance_id\": \"x\",\n  \"host\": \"h\",\n  \"port\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Heartbeat for an unknown instance (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Error body\", () => pm.expect(pm.response.json().error).to.include(\"not registered\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/instances/does-not-exist/heartbeat",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Deregister (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/instances/probe-{{run_id}}",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Deregistered service is gone (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/services/lab3-postman-probe/instances",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Gateway routes every service through Service Discovery (Grades 5-6)",
+      "description": "Signs up a test user, then calls each of the 8 services through the gateway. Every response carries X-Upstream-Instance, which must be one of that service's registered instances.",
+      "item": [
+        {
+          "name": "Register an instance that never sends heartbeats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "// Checked in folder 6: the registry must drop it after the heartbeat timeout (30 s).",
+                  "pm.collectionVariables.set(\"expiry_registered_at\", Date.now().toString());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{registry_url}}/api/registry/instances",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_name\": \"lab3-expiry-probe\",\n  \"instance_id\": \"expiry-{{run_id}}\",\n  \"host\": \"expiry-{{run_id}}.invalid\",\n  \"port\": 8080\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sign up a test user (User Management)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "lab3.expectServedBy(pm, \"user-management-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"lab3_{{run_id}}\",\n  \"email\": \"lab3_{{run_id}}@example.invalid\",\n  \"password\": \"PostmanTest123!\",\n  \"package_id\": \"00000000-0000-0000-0000-000000000001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Log in (User Management)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set(\"jwt\", body.jwt);",
+                  "  pm.collectionVariables.set(\"user_id\", body.user_id);",
+                  "}",
+                  "lab3.expectServedBy(pm, \"user-management-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"lab3_{{run_id}}@example.invalid\",\n  \"password\": \"PostmanTest123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Tamagotchi Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "lab3.expectServedBy(pm, \"tamagotchi-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/tamagotchis/types",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Notification Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "lab3.expectServedBy(pm, \"notification-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/notifications?user_id={{user_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Map Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "lab3.expectServedBy(pm, \"map-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/map/nearby?user_id={{user_id}}&radius_meters=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monster Raid Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "lab3.expectServedBy(pm, \"monster-raid-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/raids?status=active",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Guild Service (create a guild)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set(\"guild_id\", pm.response.json().guild_id);",
+                  "lab3.expectServedBy(pm, \"guild-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/guilds",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lab 3 Postman {{run_id}}\",\n  \"description\": \"Lab 3 scaling check\",\n  \"owner_id\": \"{{user_id}}\",\n  \"event_id\": \"{{$guid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Package Registry Service (unknown id, 404 from the service)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404 from the service, not the gateway\", () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.be.undefined;",
+                  "});",
+                  "lab3.expectServedBy(pm, \"package-registry-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/packages/00000000-0000-0000-0000-000000000002",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Battle Service (unknown id, 404 from the service)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404 from the service, not the gateway\", () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.be.undefined;",
+                  "});",
+                  "lab3.expectServedBy(pm, \"battle-service\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/battles/00000000-0000-0000-0000-000000000002",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Round-robin load balancing (Grade 6)",
+      "description": "Sends the same request several times in a row. The gateway must rotate through the service's replicas: no instance twice in a row, and every replica used.",
+      "item": [
+        {
+          "name": "Round-robin across tamagotchi-service replicas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const seen = JSON.parse(pm.collectionVariables.get(\"rr_seen\") || \"[]\");",
+                  "seen.push(lab3.upstream(pm));",
+                  "const replicas = lab3.instancesOf(pm, \"tamagotchi-service\");",
+                  "const rounds = replicas.length * 2;",
+                  "",
+                  "if (seen.length < rounds) {",
+                  "  pm.collectionVariables.set(\"rr_seen\", JSON.stringify(seen));",
+                  "  lab3.repeat(pm, postman);",
+                  "} else {",
+                  "  pm.collectionVariables.set(\"rr_seen\", \"[]\");",
+                  "  console.log(\"Round-robin order:\", seen.join(\" -> \"));",
+                  "  pm.test(`Every replica served a request (${seen.join(\" -> \")})`, () =>",
+                  "    pm.expect(new Set(seen)).to.have.property(\"size\", replicas.length));",
+                  "  pm.test(\"No replica served two requests in a row\", () =>",
+                  "    seen.slice(1).forEach((id, i) => pm.expect(id).to.not.eql(seen[i])));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/tamagotchis/types",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Realtime connections are routed to a registered instance",
+      "description": "WebSocket negotiation picks a registered guild-service instance and returns its id, so a client always reconnects to the instance that holds its session.",
+      "item": [
+        {
+          "name": "Negotiate a guild chat WebSocket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Direct WebSocket URL\", () => pm.expect(body.url).to.match(/^wss?:\\/\\//));",
+                  "pm.test(\"Negotiated with a registered guild-service instance\", () =>",
+                  "  pm.expect(lab3.instancesOf(pm, \"guild-service\")).to.include(body.instance_id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/realtime/guilds/{{guild_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Circuit breaker removes a failing instance; expired instances leave (Grades 7, 10)",
+      "description": "Registers a fake tamagotchi-service instance whose host does not resolve. The round-robin sends it every few requests; after 3 failures its circuit breaker opens, the gateway stops using it and removes it from Service Discovery. The real replicas keep serving. Then checks that the instance registered in folder 3 without heartbeats was dropped after the 30 s heartbeat timeout. Takes about 40 s in total.",
+      "item": [
+        {
+          "name": "Add a broken tamagotchi-service instance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"broken_registered_at\", Date.now().toString());",
+                  "pm.collectionVariables.set(\"cb_results\", \"[]\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{registry_url}}/api/registry/instances",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_name\": \"tamagotchi-service\",\n  \"instance_id\": \"broken-{{run_id}}\",\n  \"host\": \"broken-{{run_id}}.invalid\",\n  \"port\": 8080\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Send traffic until the breaker trips",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The gateway reloads the registry every 5 s; wait until it has seen the new instance.",
+                  "const since = Date.now() - Number(pm.collectionVariables.get(\"broken_registered_at\"));",
+                  "if (JSON.parse(pm.collectionVariables.get(\"cb_results\") || \"[]\").length === 0 && since < 7000) {",
+                  "  setTimeout(() => {}, 7000 - since);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const results = JSON.parse(pm.collectionVariables.get(\"cb_results\") || \"[]\");",
+                  "results.push({ status: pm.response.code, instance: lab3.upstream(pm) || \"gateway\" });",
+                  "pm.collectionVariables.set(\"cb_results\", JSON.stringify(results));",
+                  "const broken = \"broken-\" + pm.collectionVariables.get(\"run_id\");",
+                  "const failures = results.filter(r => r.status === 503).length;",
+                  "",
+                  "// Keep sending until the broken instance failed 3 times (breaker opens), then a few more.",
+                  "const enough = failures >= 3 && results.length >= 15;",
+                  "if (!enough && results.length < 40) {",
+                  "  lab3.repeat(pm, postman);",
+                  "} else {",
+                  "  console.log(\"Responses:\", results.map(r => r.status).join(\" \"));",
+                  "  pm.test(\"The broken instance received traffic and failed (503)\", () => pm.expect(failures).to.be.at.least(1));",
+                  "  pm.test(\"The breaker opened after 3 failures: no more 503s afterwards\", () => {",
+                  "    const lastFailure = results.map(r => r.status).lastIndexOf(503);",
+                  "    pm.expect(failures).to.eql(3);",
+                  "    pm.expect(results.slice(lastFailure + 1).every(r => r.status === 200)).to.be.true;",
+                  "  });",
+                  "  pm.test(\"Healthy replicas kept serving\", () =>",
+                  "    pm.expect(results.filter(r => r.status === 200).length).to.be.above(failures));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/tamagotchis/types",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "The gateway removed the broken instance from Service Discovery",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Removal runs on a worker thread right after the trip; give it a moment.",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().instances.map(i => i.instance_id);",
+                  "const age = (Date.now() - Number(pm.collectionVariables.get(\"broken_registered_at\"))) / 1000;",
+                  "pm.test(\"broken instance deregistered by the gateway\", () =>",
+                  "  pm.expect(ids).to.not.include(\"broken-\" + pm.collectionVariables.get(\"run_id\")));",
+                  "pm.test(`Removed within ${age.toFixed(0)} s, before the 30 s heartbeat timeout could have`, () =>",
+                  "  pm.expect(age).to.be.below(30));",
+                  "pm.test(\"The real replicas are still registered\", () =>",
+                  "  pm.expect(ids.filter(id => lab3.instancesOf(pm, \"tamagotchi-service\").includes(id))).to.have.length.of.at.least(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/services/tamagotchi-service/instances",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "An instance without heartbeats expires after 30 s",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Heartbeat timeout 30 s + expiry sweep every 5 s: wait until 37 s after registration.",
+                  "const waitMs = 37000 - (Date.now() - Number(pm.collectionVariables.get(\"expiry_registered_at\")));",
+                  "if (waitMs > 0) setTimeout(() => {}, waitMs);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const age = (Date.now() - Number(pm.collectionVariables.get(\"expiry_registered_at\"))) / 1000;",
+                  "pm.test(`Dropped by the registry (${age.toFixed(0)} s after registering, no heartbeat)`, () =>",
+                  "  pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{registry_url}}/api/registry/services/lab3-expiry-probe/instances",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

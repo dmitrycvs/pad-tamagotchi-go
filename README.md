@@ -52,11 +52,17 @@ Services are paired by coupling: each owner holds the two services that talk to 
   <img src="./src/application_diagram.png" alt="Architecture Diagram" width="100%">
 </a>
 
-[Open full-size diagram](./src/application_diagram.png)
+[Open full-size diagram](./src/application_diagram.png) · source: [`application_diagram.svg`](./src/application_diagram.svg)
 
-The gateway routes REST requests to all eight services in the shaded area.
-Arrows between services show logical dependencies; their REST calls also pass
-through the gateway. WebSockets connect directly after gateway negotiation.
+Clients and services send every REST call to the **API Gateway**, which checks
+the JWT and forwards the request round-robin to one registered instance of the
+owning service. Each business service runs as several replicas; every replica
+registers with **Service Discovery**, sends heartbeats and exposes `/health`,
+which Service Discovery polls. The gateway reads the instance list every 5 s,
+trips a circuit breaker on an instance that keeps failing and removes it from
+the registry; health alerts, trips and removals are posted to **Discord**.
+WebSockets connect directly to the instance chosen during gateway negotiation.
+The dependencies between services are listed below.
 
 **How the services communicate:**
 

@@ -1739,6 +1739,12 @@ send its requests in order through the gateway at port 8080. Detailed collection
 for each service live in [`postman/services/`](./postman/services); see the
 [Postman guide](./postman/README.md) for setup and expected responses.
 
+For Lab 3, run the [scaling check](./postman/lab3-scaling.postman_collection.json)
+with the Collection Runner. It checks health and registration, the registry API,
+routing through Service Discovery, round-robin, realtime routing, and the circuit
+breaker removing a failing instance. See the
+[Postman guide](./postman/README.md#lab-3-scaling-check).
+
 ---
 
 ## GitHub Workflow

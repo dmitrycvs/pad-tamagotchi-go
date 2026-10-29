@@ -1505,7 +1505,7 @@ matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
-| **API Gateway** | `dmitrycvs/api-gateway:2.1.0`               | **8080** |
+| **API Gateway** | `dmitrycvs/api-gateway:3.0.0`               | **8080** |
 | User Management       | `filipel2004/user-management-service:3.0.0` | —              |
 | Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:2.0.1`        | —              |
@@ -1949,7 +1949,7 @@ Both services expose `/health`, return 503 with `Retry-After: 1` when their conc
 Guild and Package Registry expose the shared load fields, log requests with
 correlation ids, register and heartbeat, and protect outgoing business calls with
 the shared rolling-window breaker. Guild and Package Registry target `3.0.0`.
-Service Discovery `3.3.0` sends health transitions to Discord; Gateway `2.1.0`
+Service Discovery `3.3.0` sends health transitions to Discord; Gateway `3.0.0`
 removes tripped registry instances and sends trip/removal alerts. Set
 `DISCORD_WEBHOOK_URL` in `.env` for both Java services. Empty disables delivery.
 The URL is secret and must never be committed. The optional `DISCORD_*` settings

@@ -51,7 +51,7 @@ services:
       start_period: 30s
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-2.1.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     environment:

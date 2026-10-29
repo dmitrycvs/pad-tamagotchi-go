@@ -258,7 +258,7 @@ services:
       - "8091-8093:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-2.1.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

@@ -1512,7 +1512,7 @@ matching `TAG_*` to `dev` in `.env`.
 | Notification          | `dmitrycvs/notification-service:2.0.1`      | —              |
 | Map                   | `takima/pad-map-service:2.1.0`              | 8085–8087      |
 | Monster Raid          | `takima/pad-monster-raid-service:2.1.0`     | 8088–8090      |
-| Guild                 | `maxkostov/guild-service:2.1.0`             | 8091–8093      |
+| Guild                 | `maxkostov/guild-service:3.0.0`             | 8091–8093      |
 | Package Registry      | `maxkostov/package-registry-service:3.0.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.3.0`         | **8761** |
 
@@ -1948,7 +1948,7 @@ Both services expose `/health`, return 503 with `Retry-After: 1` when their conc
 
 Guild and Package Registry expose the shared load fields, log requests with
 correlation ids, register and heartbeat, and protect outgoing business calls with
-the shared rolling-window breaker. Guild targets `2.1.0`; Package Registry targets `3.0.0`.
+the shared rolling-window breaker. Guild and Package Registry target `3.0.0`.
 Service Discovery `3.3.0` sends health transitions to Discord; Gateway `2.1.0`
 removes tripped registry instances and sends trip/removal alerts. Set
 `DISCORD_WEBHOOK_URL` in `.env` for both Java services. Empty disables delivery.

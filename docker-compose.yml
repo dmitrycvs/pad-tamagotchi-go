@@ -229,7 +229,7 @@ services:
       - "8088-8090:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-2.1.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

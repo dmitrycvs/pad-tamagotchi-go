@@ -3,14 +3,14 @@
 Checked 2026-11-09. The broker core, Compose integration and monitoring run
 locally; all five service PRs pass CI. Broker PR #1 is approved and merged into
 `develop`; the four other service PRs await review. The common integration stays draft
-because required reviews, image publication, and other owners' instrumentation
+because remaining required reviews, image publication, and other owners' instrumentation
 are outstanding. No protected branch was bypassed.
 
 ## Image and contract
 
 Release target: **`maxkostov/message-broker:1.0.0`**. **Not published yet.**
-`DOCKERHUB_USERNAME` is configured; the user explicitly deferred supplying
-`DOCKERHUB_TOKEN`. CI builds the exact multi-stage image without pushing.
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are configured (the user supplied the
+token after initial preparation). CI builds the exact multi-stage image without pushing.
 The main release workflow verifies tests/coverage, refuses an existing version,
 pushes the version plus latest, and creates the matching Git tag.
 
@@ -36,7 +36,7 @@ requirements remain active: one develop approval, two main approvals.
 | Package Registry | [#6](https://github.com/MaxKostov/package-registry-service/pull/6) | `85ff960` | 3.1.0 |
 
 Broker release [PR #2](https://github.com/MaxKostov/message-broker/pull/2) is
-prepared as a draft against main while the token is deferred. The merged broker
+ready against main; both required reviews were requested from Dmitrii and Denis. The merged broker
 tree matches the tested feature tree exactly. After reviews, squash the four
 remaining service feature PRs into develop, open their release PRs to main, and
 wait for successful versioned image publication. Refresh the CPR
@@ -132,8 +132,9 @@ contain statuses, assertions and timings without credentials.
 
 ## Open work
 
-1. Obtain required service PR/release reviews and the deferred broker DockerHub
-   token. Publish the five target versions and refresh gitlinks to release SHAs.
+1. Obtain required service PR/release reviews. Broker DockerHub credentials are
+   now configured; release PR #2 is ready. Publish the five target versions and
+   refresh gitlinks to release SHAs.
 2. Other owners must add `/metrics` and shared log files for their six services:
    [readiness table](../monitoring/metrics-readiness.md),
    [posted owner follow-up](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55#issuecomment-6743394529).

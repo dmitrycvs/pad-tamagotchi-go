@@ -7,7 +7,7 @@ Prometheus additionally scrapes itself, so its targets view has 20 targets.
 
 | Service | Instances checked | GET /metrics | Owner / next action |
 | --- | --- | --- | --- |
-| message-broker | 1 | 200, valid Prometheus | Max; PR 1 merged, release PR 2 draft / target 1.0.0 |
+| message-broker | 1 | 200, valid Prometheus | Max; PRs 1/2 merged, 1.0.0 published |
 | api-gateway | 1 | 200, valid Prometheus | Max / Dmitrii; PR 14, target 3.1.0 |
 | service-discovery | 1 | 200, valid Prometheus | Max; PR 8, target 3.4.0 |
 | guild-service | 2 | Both 200, valid Prometheus | Max; PR 7, target 3.1.0 |

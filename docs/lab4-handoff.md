@@ -3,12 +3,17 @@
 Checked 2026-11-09. The broker core, Compose integration and monitoring run
 locally; all five service PRs pass CI. Broker PR #1 is approved and merged into
 `develop`; the four other service PRs await review. The common integration stays draft
-because remaining required reviews, image publication, and other owners' instrumentation
+because four remaining service reviews/releases and other owners' instrumentation
 are outstanding. No protected branch was bypassed.
 
 ## Image and contract
 
-Release target: **`maxkostov/message-broker:1.0.0`**. **Not published yet.**
+Published image: **`maxkostov/message-broker:1.0.0`** (also `latest`).
+Release [workflow 42645173475](https://github.com/MaxKostov/message-broker/actions/runs/42645173475)
+succeeded; Git tag `v1.0.0` points to main commit `8f63750`.
+Version and latest resolve to manifest digest
+`sha256:877db821a784d77489927be894711c8625549c85dd1a1e09757bde65eaaaddf0`;
+image labels confirm version 1.0.0 and the same full source revision.
 `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are configured (the user supplied the
 token after initial preparation). CI builds the exact multi-stage image without pushing.
 The main release workflow verifies tests/coverage, refuses an existing version,
@@ -32,14 +37,16 @@ Protected main/develop branches retain their deletion restriction.
 
 | Repository | Develop PR | Tested source commit | Release target |
 | --- | --- | --- | --- |
-| Message Broker | [#1](https://github.com/MaxKostov/message-broker/pull/1) | `9bceac6` (reviewed develop) | 1.0.0 |
+| Message Broker | [#1](https://github.com/MaxKostov/message-broker/pull/1) | `8f63750` (released main) | 1.0.0 |
 | API Gateway | [#14](https://github.com/MaxKostov/api-gateway/pull/14) | `cbe6b75` | 3.1.0 |
 | Service Discovery | [#8](https://github.com/MaxKostov/service-discovery/pull/8) | `4073f0c` | 3.4.0 |
 | Guild | [#7](https://github.com/MaxKostov/guild-service/pull/7) | `c196b68` | 3.1.0 |
 | Package Registry | [#6](https://github.com/MaxKostov/package-registry-service/pull/6) | `85ff960` | 3.1.0 |
 
 Broker release [PR #2](https://github.com/MaxKostov/message-broker/pull/2) is
-ready against main; both required reviews were requested from Dmitrii and Denis. The merged broker
+merged into main after both required approvals; auto-merge remained disabled.
+The main release commit is `8f63750`; its workflow succeeded and published the
+versioned image plus Git tag. The merged broker
 tree matches the tested feature tree exactly. After reviews, squash the four
 remaining service feature PRs into develop, open their release PRs to main, and
 wait for successful versioned image publication. Refresh the CPR
@@ -114,10 +121,10 @@ start. Grafana provisions Prometheus, Loki, and the 12-panel dashboard.
 | Guild vet + full PostgreSQL/Redis race suite | Pass, 79.3% aggregate coverage |
 | Package Registry vet + full PostgreSQL race suite | Pass, 83.2% aggregate coverage |
 | Service CI test/coverage and Docker builds | All five PRs green |
-| Exact local Dockerfiles | All five built; Temurin 21 for Java |
+| Exact Dockerfiles / release | All five built; broker 1.0.0 publication and running release image verified |
 | Prometheus / Alloy / Loki config validation | Pass with the pinned images |
 | Full `docker compose ... up -d --wait` | Exit 0; 25 running containers, two completed initialization jobs |
-| Postman regression | 46 requests, 100 assertions, zero failures |
+| Postman regression | 46 requests, 100 assertions, zero failures; repeated against the published broker image |
 | Actual nested client call | Guild POST → broker → User GET 200 → Guild 201, same request ID |
 | All configured peer transport contracts | 18 edges pass; selected-instance/error-origin checks pass |
 | Grafana | Dashboard exists; actual Prometheus proxy returns request rates and Loki proxy returns logs for five services |
@@ -135,9 +142,9 @@ contain statuses, assertions and timings without credentials.
 
 ## Open work
 
-1. Obtain required service PR/release reviews. Broker DockerHub credentials are
-   now configured; release PR #2 is ready. Publish the five target versions and
-   refresh gitlinks to release SHAs.
+1. Broker 1.0.0 is published and its gitlink now points to released main. Obtain
+   the four other services' required feature/release reviews, publish their
+   target versions, and refresh those gitlinks to release SHAs.
 2. Other owners must add `/metrics` and shared log files for their six services:
    [readiness table](../monitoring/metrics-readiness.md),
    [posted owner follow-up](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55#issuecomment-6743394529).
@@ -153,8 +160,9 @@ contain statuses, assertions and timings without credentials.
 ## Current local stack
 
 The tested integration worktree is `/private/tmp/pad-lab4-broker` on
-`feat/shared/AddMessageBroker`. Local-only source images use `*:lab4-local` tags;
-they are intentionally not tagged as published releases. ARM images for the
+`feat/shared/AddMessageBroker`. The broker now runs the published `maxkostov/message-broker:1.0.0` image.
+Four other source images still use local-only `*:lab4-local` tags until their
+reviews/releases complete; they are not tagged as published releases. ARM images for the
 four existing Java/Go services run natively locally; CI verifies amd64 release
 builds. Broker's local image is amd64. No published version was overwritten.
 

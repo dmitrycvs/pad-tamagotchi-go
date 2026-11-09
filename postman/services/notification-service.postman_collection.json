@@ -77,7 +77,7 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"event_id\": \"{{$guid}}\",\n  \"recipient_id\": \"{{user_id}}\",\n  \"type\": \"battle_request_received\",\n  \"title\": \"Battle request\",\n  \"body\": \"A trainer wants to battle!\",\n  \"data\": {\n    \"battle_id\": \"{{battle_id}}\",\n    \"challenger_id\": \"{{challenger_id}}\"\n  }\n}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{base_url}}/api/notifications/publish", "host": ["{{base_url}}"], "path": ["api", "notifications", "publish"] },
+            "url": { "raw": "{{broker_url}}/q/notification-service/api/notifications/publish", "host": ["{{broker_url}}"], "path": ["q", "notification-service", "api", "notifications", "publish"] },
             "description": "Internal idempotent endpoint; requires service_jwt."
           },
           "response": [{ "name": "202 Accepted", "status": "Accepted", "code": 202, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"notification_id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n  \"status\": \"queued\",\n  \"devices_targeted\": 1\n}" }]
@@ -112,7 +112,7 @@
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{service_jwt}}", "type": "string" }] },
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{base_url}}/api/notifications/{{notification_id}}/status", "host": ["{{base_url}}"], "path": ["api", "notifications", "{{notification_id}}", "status"] },
+            "url": { "raw": "{{broker_url}}/q/notification-service/api/notifications/{{notification_id}}/status", "host": ["{{broker_url}}"], "path": ["q", "notification-service", "api", "notifications", "{{notification_id}}", "status"] },
             "description": "Internal endpoint; requires service_jwt."
           },
           "response": [{ "name": "200 OK", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"notification_id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n  \"status\": \"delivered\",\n  \"attempts\": 1,\n  \"deliveries\": [\n    {\n      \"device_id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"status\": \"delivered\",\n      \"at\": \"2026-09-24T12:05:01Z\"\n    }\n  ]\n}" }]
@@ -168,6 +168,7 @@
       "});"
     ] } }],
   "variable": [
+    { "key": "broker_url", "value": "http://localhost:8070" },
     { "key": "registry_url", "value": "http://localhost:8761", "type": "string", "description": "Service Discovery, for the health checks." },
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },

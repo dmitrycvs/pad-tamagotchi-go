@@ -46,7 +46,7 @@ exclude health/scrape requests. Avoid paths, request IDs and user IDs in labels.
 ## Logs
 
 The `tamagotchi-logs` named volume is mounted at `/var/log/tamagotchi`.
-Broker, Guild and Package Registry write stdout and per-instance files there.
+Broker, Guild, Package Registry, Tamagotchi and Notification write stdout and per-instance files there.
 Spring's standard `LOGGING_FILE_NAME` also captures Gateway and Discovery logs
 without changing their message format. Their default Compose replica count is
 one; do not scale these two with a shared filename without adding an instance

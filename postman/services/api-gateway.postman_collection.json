@@ -118,7 +118,8 @@
 							"script": {
 								"type": "text/javascript",
 								"exec": [
-									"pm.test(\"Passed the gateway (any response now comes from the service)\", () => pm.response.to.not.have.header(\"X-Gateway-Error\"));"
+									"pm.test(\"Status is 404: services call this through the broker\", () => pm.response.to.have.status(404));",
+									"pm.test(\"Rejected by the gateway itself\", () => pm.response.to.have.header(\"X-Gateway-Error\", \"true\"));"
 								]
 							}
 						}
@@ -351,14 +352,14 @@
 					]
 				},
 				{
-					"name": "Service-only endpoint with user token → 403",
+					"name": "Internal route with user token → 404",
 					"event": [
 						{
 							"listen": "test",
 							"script": {
 								"type": "text/javascript",
 								"exec": [
-									"pm.test(\"Status is 403 Forbidden\", () => pm.response.to.have.status(403));",
+									"pm.test(\"Status is 404: internal routes are not exposed (Lab 4)\", () => pm.response.to.have.status(404));",
 									"pm.test(\"Rejected by the gateway itself\", () => pm.response.to.have.header(\"X-Gateway-Error\", \"true\"));"
 								]
 							}
@@ -546,7 +547,7 @@
 					"response": []
 				},
 				{
-					"name": "Service-only endpoint with service token (routed)",
+					"name": "Internal route with service token → 404",
 					"event": [
 						{
 							"listen": "test",

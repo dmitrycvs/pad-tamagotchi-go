@@ -543,11 +543,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/guilds/{{guild_id}}/members/{{member_id}}",
+              "raw": "{{broker_url}}/q/guild-service/api/guilds/{{guild_id}}/members/{{member_id}}",
               "host": [
-                "{{base_url}}"
+                "{{broker_url}}"
               ],
               "path": [
+                "q",
+                "guild-service",
                 "api",
                 "guilds",
                 "{{guild_id}}",
@@ -912,6 +914,7 @@
     }
   ],
   "variable": [
+    { "key": "broker_url", "value": "http://localhost:8070" },
     {
       "key": "jwt_secret",
       "value": "",

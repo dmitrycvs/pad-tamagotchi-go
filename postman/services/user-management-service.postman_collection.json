@@ -156,7 +156,7 @@
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{service_jwt}}", "type": "string" }] },
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/relationship/{{other_user_id}}", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "relationship", "{{other_user_id}}"] },
+            "url": { "raw": "{{broker_url}}/q/user-management-service/api/users/{{user_id}}/relationship/{{other_user_id}}", "host": ["{{broker_url}}"], "path": ["q", "user-management-service", "api", "users", "{{user_id}}", "relationship", "{{other_user_id}}"] },
             "description": "Internal endpoint; requires a service JWT."
           },
           "response": [
@@ -244,7 +244,7 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"event_id\": \"{{$guid}}\",\n  \"currency\": \"global\",\n  \"amount\": 120,\n  \"reason\": \"battle_won\"\n}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{base_url}}/api/users/{{user_id}}/currency", "host": ["{{base_url}}"], "path": ["api", "users", "{{user_id}}", "currency"] },
+            "url": { "raw": "{{broker_url}}/q/user-management-service/api/users/{{user_id}}/currency", "host": ["{{broker_url}}"], "path": ["q", "user-management-service", "api", "users", "{{user_id}}", "currency"] },
             "description": "Internal idempotent endpoint; requires a service JWT."
           },
           "response": [
@@ -286,6 +286,7 @@
       "});"
     ] } }],
   "variable": [
+    { "key": "broker_url", "value": "http://localhost:8070" },
     { "key": "registry_url", "value": "http://localhost:8761", "type": "string", "description": "Service Discovery, for the health checks." },
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },

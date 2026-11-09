@@ -326,11 +326,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/packages/{{package_id}}/stat-definitions",
+              "raw": "{{broker_url}}/q/package-registry-service/api/packages/{{package_id}}/stat-definitions",
               "host": [
-                "{{base_url}}"
+                "{{broker_url}}"
               ],
               "path": [
+                "q",
+                "package-registry-service",
                 "api",
                 "packages",
                 "{{package_id}}",
@@ -508,11 +510,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/monsters",
+              "raw": "{{broker_url}}/q/package-registry-service/api/monsters",
               "host": [
-                "{{base_url}}"
+                "{{broker_url}}"
               ],
               "path": [
+                "q",
+                "package-registry-service",
                 "api",
                 "monsters"
               ]
@@ -894,6 +898,7 @@
     }
   ],
   "variable": [
+    { "key": "broker_url", "value": "http://localhost:8070" },
     {
       "key": "jwt_secret",
       "value": "",

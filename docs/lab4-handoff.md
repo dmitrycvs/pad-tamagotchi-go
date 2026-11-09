@@ -1,7 +1,8 @@
 # Lab 4 step 1 handoff for Dmitrii
 
 Checked 2026-11-09. The broker core, Compose integration and monitoring run
-locally; all five service PRs pass CI. The common integration stays draft
+locally; all five service PRs pass CI. Broker PR #1 is approved and merged into
+`develop`; the four other service PRs await review. The common integration stays draft
 because required reviews, image publication, and other owners' instrumentation
 are outstanding. No protected branch was bypassed.
 
@@ -14,8 +15,8 @@ The main release workflow verifies tests/coverage, refuses an existing version,
 pushes the version plus latest, and creates the matching Git tag.
 
 Reviewable contract:
-[Message Broker shared contract](https://github.com/MaxKostov/message-broker/blob/feat/message-broker/ImplementRequestQueues/README.md#shared-contract).
-This link uses the feature branch until develop is merged. It documents the
+[Message Broker shared contract](https://github.com/MaxKostov/message-broker/blob/develop/README.md#shared-contract).
+This link uses the reviewed develop branch. It documents the
 request envelope, raw HTTP reply, queue names, status/error headers, public peer
 reads, JWT trust translation and thin prefix. Topics (Dmitrii) and gRPC (Denis)
 remain explicit placeholders. Port 9070 is reserved without a listener.
@@ -26,16 +27,19 @@ requirements remain active: one develop approval, two main approvals.
 
 ## Source and review sequence
 
-| Repository | Develop PR | Tested feature commit | Release target |
+| Repository | Develop PR | Tested source commit | Release target |
 | --- | --- | --- | --- |
-| Message Broker | [#1](https://github.com/MaxKostov/message-broker/pull/1) | `4b79861` | 1.0.0 |
+| Message Broker | [#1](https://github.com/MaxKostov/message-broker/pull/1) | `9bceac6` (reviewed develop) | 1.0.0 |
 | API Gateway | [#14](https://github.com/MaxKostov/api-gateway/pull/14) | `cbe6b75` | 3.1.0 |
 | Service Discovery | [#8](https://github.com/MaxKostov/service-discovery/pull/8) | `4073f0c` | 3.4.0 |
 | Guild | [#7](https://github.com/MaxKostov/guild-service/pull/7) | `c196b68` | 3.1.0 |
 | Package Registry | [#6](https://github.com/MaxKostov/package-registry-service/pull/6) | `85ff960` | 3.1.0 |
 
-After reviews, squash service feature PRs into develop, open their release PRs
-to main, and wait for successful versioned image publication. Refresh the CPR
+Broker release [PR #2](https://github.com/MaxKostov/message-broker/pull/2) is
+prepared as a draft against main while the token is deferred. The merged broker
+tree matches the tested feature tree exactly. After reviews, squash the four
+remaining service feature PRs into develop, open their release PRs to main, and
+wait for successful versioned image publication. Refresh the CPR
 gitlinks to the resulting released commits (squash SHAs will differ from this
 table). Verify the pinned tags exist, then ready and squash the CPR integration
 PR into develop. Do not merge the current draft against unpublished image tags.

@@ -69,11 +69,6 @@ services:
     environment:
       JAVA_OPTS: ${GATEWAY_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
       LOGGING_FILE_NAME: /var/log/tamagotchi/api-gateway.log
-      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
-      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
-      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
-      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
-      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
@@ -166,7 +161,14 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      LOG_DIR: /var/log/tamagotchi
+      # Events go to broker topics (tamagotchi.captured) instead of NOTIFICATION_SERVICE_URL.
+      MESSAGE_BROKER_URL: http://message-broker:8070
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
@@ -191,7 +193,12 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      LOG_DIR: /var/log/tamagotchi
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".

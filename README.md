@@ -754,6 +754,32 @@ Headers: `Authorization: Bearer <jwt>`
 
 Success (204 No Content)
 
+#### Receive a Topic Event
+
+`POST /api/events` — called by the **Message Broker** for the topics this service subscribes to (Lab 4). Not exposed by the API Gateway. Idempotent via `event_id`.
+
+```json
+{
+  "event_id": "evt-uuid-capture-001",
+  "topic": "tamagotchi.captured",
+  "type": "tamagotchi_captured",
+  "occurred_at": "2026-11-10T12:00:00Z",
+  "publisher": "tamagotchi-service",
+  "payload": { "recipient_id": "user-uuid-456", "tamagotchi_id": "tama-uuid-001", "new_owner_id": "user-uuid-123" }
+}
+```
+
+`payload.recipient_id` is required; `payload.title` and `payload.body` are optional (defaults per topic). Answers **202** like Publish an Event; **400** for a missing `event_id`, `topic` or recipient; **422** for a topic the service does not subscribe to.
+
+| Topic | Notification type |
+|---|---|
+| `user.friend_request_received` | `friend_request_received` |
+| `map.nearby_player_detected` | `nearby_player_detected` |
+| `battle.request_received` | `battle_request_received` |
+| `tamagotchi.captured` | `tamagotchi_captured` |
+| `guild.invitation_sent` | `guild_invitation` |
+| `raid.started` | `raid_started` |
+
 #### Publish an Event
 
 `POST /api/notifications/publish`
@@ -2010,6 +2036,28 @@ Package Registry **3.1.0**, Service Discovery **3.4.0**. All versioned images,
 Git tags and released submodule commits were verified. Exact image digests:
 [docs/lab4-releases.json](./docs/lab4-releases.json). The integration PR now
 records the release commits rather than feature/develop snapshots.
+
+### Topics (Lab 4, step 2)
+
+Service-to-service **events** use topics: a service fires an event with
+`POST http://message-broker:8070/api/topics/{topic}/events` and does not know who
+listens. Services subscribe by listing topics in the `topics` field of their
+Service Discovery registration; the broker delivers one copy per subscribing
+service to `POST /api/events`, through the same load balancer and breaker as
+request queues. Names are `domain.event`. Full contract:
+[broker README, "Topics"](./message-broker/README.md#topics).
+
+| Topic | Publisher | Subscribers |
+| --- | --- | --- |
+| `tamagotchi.captured` | Tamagotchi (`MESSAGE_BROKER_URL` set) | Notification |
+| `user.friend_request_received`, `map.nearby_player_detected`, `battle.request_received`, `guild.invitation_sent`, `raid.started` | to be moved by each owner (they still call `/api/notifications/publish`) | Notification |
+
+Request queues stay for calls that need an answer from a known service. Internal
+service-to-service routes are no longer exposed by the gateway (404); services
+reach them through the broker.
+
+Tamagotchi and Notification also write their logs to the shared
+`/var/log/tamagotchi` folder (`LOG_DIR`) and serve `GET /metrics`.
 
 Current evidence, remaining owner instrumentation and the Topics/gRPC handoff:
 [docs/lab4-handoff.md](./docs/lab4-handoff.md),

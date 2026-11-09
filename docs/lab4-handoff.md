@@ -38,6 +38,7 @@ and invitations for huntrese, dmitrycvs, aXeeDENt and filipel2004. GitHub review
 requirements remain active: one develop approval, two main approvals.
 Per the user's preference, merges remain manual (`allow_auto_merge=false`);
 merged feature branches are deleted by default (`delete_branch_on_merge=true`).
+Main allows merge commits only; feature squash merges remain available on develop.
 Protected main/develop branches retain their deletion restriction.
 
 ## Source and review sequence
@@ -57,10 +58,20 @@ merged source tree was compared with its tested feature tree and is identical.
 
 The four remaining release PRs are ready for manual review/merge:
 
-- [API Gateway 3.1.0](https://github.com/MaxKostov/api-gateway/pull/15)
-- [Service Discovery 3.4.0](https://github.com/MaxKostov/service-discovery/pull/9)
+- [API Gateway 3.1.0](https://github.com/MaxKostov/api-gateway/pull/16)
+- [Service Discovery 3.4.0](https://github.com/MaxKostov/service-discovery/pull/10)
 - [Guild Service 3.1.0](https://github.com/MaxKostov/guild-service/pull/8)
 - [Package Registry Service 3.1.0](https://github.com/MaxKostov/package-registry-service/pull/7)
+
+Merge main release PRs with **Create a merge commit**, keeping develop ancestry.
+Feature PRs still squash into develop. Gateway #16 and Discovery #10 replace
+the conflicted #15/#9 releases; their resolved trees exactly match tested
+develop. Existing main review/CI protections remain active.
+
+Broker [history repair #3](https://github.com/MaxKostov/message-broker/pull/3)
+joins its already-released main/develop ancestry before the next Topics
+release. Its runtime/build tree is unchanged from v1.0.0; documentation/history
+updates skip image republishing. The image/tag remain immutable.
 
 After their main merges, wait for versioned image publication, verify the
 configured namespaces/tags, and refresh the CPR gitlinks to the released main

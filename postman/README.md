@@ -73,3 +73,18 @@ takes about 40 s. Not checked here: Discord alerts (they need
 a dependency (for example `docker compose stop user-management-service`), call
 an endpoint that uses it 3 times, and
 `docker compose logs | grep "Circuit breaker opened"`.
+
+
+## Lab 4 broker regression
+
+Import [lab3-broker.postman_collection.json](./lab3-broker.postman_collection.json).
+It retains the 18-request Lab 3 baseline, adds broker health, metrics,
+authentication/error/envelope checks and all 18 configured peer transport edges.
+For the final edge folder, set `service_jwt_secret` in a local secret Postman
+environment. Generated service tokens exist only at runtime. Never export or
+commit populated environments or collections.
+
+The transport folder verifies broker selection and target replies; it does not
+execute every source service's HTTP client. Full battle/raid/proximity and
+Firebase delivery remain separate integration scenarios. See the Lab 4 handoff
+for actual results and owner blockers.

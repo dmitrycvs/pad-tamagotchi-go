@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+scrape_configs:
+  - job_name: tamagotchi-services
+    metrics_path: /metrics
+    scrape_timeout: 5s
+    http_sd_configs:
+      - url: http://message-broker:8070/api/monitoring/targets
+        refresh_interval: 5s
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+        labels:
+          service: prometheus

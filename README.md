@@ -2006,7 +2006,7 @@ stack results and inaccessible teammate source repositories.
 Release targets: Message Broker **1.0.0**, API Gateway **3.1.0**, Guild **3.1.0**,
 Package Registry **3.1.0**, Service Discovery **3.4.0**. These tags must exist before the integration PR can
 merge. Broker **1.0.0 is published** and its credentials are configured. The four
-remaining service source/release PRs require reviews before their target images
-can be integrated. Current evidence and open work:
+remaining service implementations are merged into develop; their prepared main
+release PRs must publish images before CPR integration. Current evidence and open work:
 [docs/lab4-handoff.md](./docs/lab4-handoff.md),
 [tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).

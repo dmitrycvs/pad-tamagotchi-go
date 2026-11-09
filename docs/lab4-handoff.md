@@ -1,10 +1,17 @@
 # Lab 4 step 1 handoff for Dmitrii
 
-Checked 2026-11-09. The broker core, Compose integration and monitoring run
-locally; all five service PRs pass CI. Broker PR #1 is approved and merged into
-`develop`; the four other service PRs await review. The common integration stays draft
-because four remaining service reviews/releases and other owners' instrumentation
-are outstanding. No protected branch was bypassed.
+Checked 2026-11-09. All five implementation PRs are merged into `develop`.
+Broker **1.0.0 is published**, and its contract/code are ready for Dmitrii's
+Topics work. The other four services have main release PRs prepared; the common
+integration remains draft until those images are published and its pointers
+are refreshed to released commits. Other owners' instrumentation is tracked
+separately. No protected branch was bypassed.
+
+Dmitrii can branch from `message-broker`'s `develop` using
+`feat/message-broker/AddTopics`. Preserve the existing request/reply contract
+and reserved metric names while adding `domain.event` topics. For the current
+full-stack integration, use the CPR branch `feat/shared/AddMessageBroker` until
+PR #56 is merged.
 
 ## Image and contract
 
@@ -38,21 +45,28 @@ Protected main/develop branches retain their deletion restriction.
 | Repository | Develop PR | Tested source commit | Release target |
 | --- | --- | --- | --- |
 | Message Broker | [#1](https://github.com/MaxKostov/message-broker/pull/1) | `8f63750` (released main) | 1.0.0 |
-| API Gateway | [#14](https://github.com/MaxKostov/api-gateway/pull/14) | `cbe6b75` | 3.1.0 |
-| Service Discovery | [#8](https://github.com/MaxKostov/service-discovery/pull/8) | `4073f0c` | 3.4.0 |
-| Guild | [#7](https://github.com/MaxKostov/guild-service/pull/7) | `c196b68` | 3.1.0 |
-| Package Registry | [#6](https://github.com/MaxKostov/package-registry-service/pull/6) | `85ff960` | 3.1.0 |
+| API Gateway | [#14](https://github.com/MaxKostov/api-gateway/pull/14) | `126a961` (merged develop) | 3.1.0 |
+| Service Discovery | [#8](https://github.com/MaxKostov/service-discovery/pull/8) | `cd62305` (merged develop) | 3.4.0 |
+| Guild | [#7](https://github.com/MaxKostov/guild-service/pull/7) | `7950135` (merged develop) | 3.1.0 |
+| Package Registry | [#6](https://github.com/MaxKostov/package-registry-service/pull/6) | `bb1c331` (merged develop) | 3.1.0 |
 
 Broker release [PR #2](https://github.com/MaxKostov/message-broker/pull/2) is
 merged into main after both required approvals; auto-merge remained disabled.
-The main release commit is `8f63750`; its workflow succeeded and published the
-versioned image plus Git tag. The merged broker
-tree matches the tested feature tree exactly. After reviews, squash the four
-remaining service feature PRs into develop, open their release PRs to main, and
-wait for successful versioned image publication. Refresh the CPR
-gitlinks to the resulting released commits (squash SHAs will differ from this
-table). Verify the pinned tags exist, then ready and squash the CPR integration
-PR into develop. Do not merge the current draft against unpublished image tags.
+The release commit `8f63750`, versioned image and Git tag are verified. Every
+merged source tree was compared with its tested feature tree and is identical.
+
+The four remaining release PRs are ready for manual review/merge:
+
+- [API Gateway 3.1.0](https://github.com/MaxKostov/api-gateway/pull/15)
+- [Service Discovery 3.4.0](https://github.com/MaxKostov/service-discovery/pull/9)
+- [Guild Service 3.1.0](https://github.com/MaxKostov/guild-service/pull/8)
+- [Package Registry Service 3.1.0](https://github.com/MaxKostov/package-registry-service/pull/7)
+
+After their main merges, wait for versioned image publication, verify the
+configured namespaces/tags, and refresh the CPR gitlinks to the released main
+commits. Then ready and squash the CPR integration PR into develop. Keep
+main/develop and delete merged feature branches. Do not merge the integration
+draft against unpublished image tags.
 The user's original checkout and its uncommitted README edits were preserved.
 
 ## Where to build the next steps
@@ -143,8 +157,8 @@ contain statuses, assertions and timings without credentials.
 ## Open work
 
 1. Broker 1.0.0 is published and its gitlink now points to released main. Obtain
-   the four other services' required feature/release reviews, publish their
-   target versions, and refresh those gitlinks to release SHAs.
+   the four other services' required main release reviews, publish their target
+   versions, and refresh those gitlinks to release SHAs.
 2. Other owners must add `/metrics` and shared log files for their six services:
    [readiness table](../monitoring/metrics-readiness.md),
    [posted owner follow-up](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55#issuecomment-6743394529).

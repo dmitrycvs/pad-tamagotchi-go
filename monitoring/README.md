@@ -83,8 +83,8 @@ running Compose network; it exits nonzero for missing/malformed metrics. See
 `metrics-readiness.md` for the last actual check and owner follow-up. Startup
 readiness of the containers is separate from instrumentation readiness.
 
-Broker and own-service source PRs can be built locally before publication using
-an untracked Compose override. Published image tags in the main Compose file
-must not be merged until those releases exist. `../docs/lab4-handoff.md` records
-release and review blockers; local verification must not be reported as a
-published release.
+All five owned/infrastructure service releases are published. The main Compose
+file uses their verified versioned image tags; no local source-image override
+is required. Released Git commits and immutable image digests are recorded in
+`../docs/lab4-releases.json`. `../docs/lab4-handoff.md` tracks the integration
+merge, broker ancestry repair, and outstanding owner instrumentation.

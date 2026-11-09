@@ -1988,7 +1988,9 @@ A broker failure returns `{ "error": "..." }` with `X-Broker-Error: true`;
 
 Monitoring configuration and the metric names reserved for later steps live in
 [monitoring/README.md](./monitoring/README.md). Set `GRAFANA_ADMIN_PASSWORD` in
-`.env`, then `docker compose up -d --wait`. Open Grafana at
+`.env`, then `docker compose up -d --wait`. Java heaps default to 256 MiB per
+process, with two available processors reported per JVM and a 150-second startup health
+grace for emulation; `*_JAVA_OPTS` settings in .env.example are configurable. Open Grafana at
 `http://localhost:3000` and Prometheus targets at `http://localhost:9090/targets`.
 The broker's HTTP SD adapter exposes every registry instance to Prometheus;
 missing `/metrics` endpoints are visible as down targets. Alloy tails the
@@ -2003,10 +2005,12 @@ verify broker transport and response ownership; they do not by themselves prove
 every calling service's HTTP client implementation. The handoff records actual
 stack results and inaccessible teammate source repositories.
 
-Release targets: Message Broker **1.0.0**, API Gateway **3.1.0**, Guild **3.1.0**,
-Package Registry **3.1.0**, Service Discovery **3.4.0**. These tags must exist before the integration PR can
-merge. Broker **1.0.0 is published** and its credentials are configured. The four
-remaining service implementations are merged into develop; their prepared main
-release PRs must publish images before CPR integration. Current evidence and open work:
+Released images: Message Broker **1.0.0**, API Gateway **3.1.0**, Guild **3.1.0**,
+Package Registry **3.1.0**, Service Discovery **3.4.0**. All versioned images,
+Git tags and released submodule commits were verified. Exact image digests:
+[docs/lab4-releases.json](./docs/lab4-releases.json). The integration PR now
+records the release commits rather than feature/develop snapshots.
+
+Current evidence, remaining owner instrumentation and the Topics/gRPC handoff:
 [docs/lab4-handoff.md](./docs/lab4-handoff.md),
 [tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).

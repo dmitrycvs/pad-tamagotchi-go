@@ -1,17 +1,17 @@
 # Metrics readiness — 2026-11-09
 
 Actual check against the running `tamagotchi-go` Compose network, after local
-source-image integration. `scripts/check-metrics.py` checks every registered
+published-image integration. `scripts/check-metrics.py` checks every registered
 instance plus Service Discovery itself. **7/19 targets pass; 12 return 404.**
 Prometheus additionally scrapes itself, so its targets view has 20 targets.
 
 | Service | Instances checked | GET /metrics | Owner / next action |
 | --- | --- | --- | --- |
 | message-broker | 1 | 200, valid Prometheus | Max; PRs 1/2 merged, 1.0.0 published |
-| api-gateway | 1 | 200, valid Prometheus | Max / Dmitrii; PR 14, target 3.1.0 |
-| service-discovery | 1 | 200, valid Prometheus | Max; PR 8, target 3.4.0 |
-| guild-service | 2 | Both 200, valid Prometheus | Max; PR 7, target 3.1.0 |
-| package-registry-service | 2 | Both 200, valid Prometheus | Max; PR 6, target 3.1.0 |
+| api-gateway | 1 | 200, valid Prometheus | Max / Dmitrii; release PR 16 merged, 3.1.0 published |
+| service-discovery | 1 | 200, valid Prometheus | Max; release PR 10 merged, 3.4.0 published |
+| guild-service | 2 | Both 200, valid Prometheus | Max; release PR 8 merged, 3.1.0 published |
+| package-registry-service | 2 | Both 200, valid Prometheus | Max; release PR 7 merged, 3.1.0 published |
 | tamagotchi-service | 2 | Both 404 | Dmitrii; checked image 2.2.0 |
 | notification-service | 2 | Both 404 | Dmitrii; checked image 2.2.0 |
 | map-service | 2 | Both 404 | Denis; checked image 2.2.0 |
@@ -33,5 +33,5 @@ data until implemented; missing owner metrics remain visible as down targets.
 
 Container startup readiness and metrics readiness are different checks:
 `docker compose ... up -d --wait` passes, while `check-metrics.py` intentionally
-exits nonzero until owners publish the missing endpoints. Local source images
-are not published release artifacts.
+exits nonzero until owners publish the missing endpoints. All five owned/infrastructure targets now run the published versions recorded
+in `../docs/lab4-releases.json`.

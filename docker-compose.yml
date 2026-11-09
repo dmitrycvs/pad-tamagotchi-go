@@ -39,6 +39,7 @@ services:
       log-init:
         condition: service_completed_successfully
     environment:
+      JAVA_OPTS: ${DISCOVERY_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
       DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
@@ -52,9 +53,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8761/health > /dev/null || exit 1"]
       interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 150s
 
   api-gateway:
     image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.1.0}
@@ -66,6 +67,7 @@ services:
       message-broker:
         condition: service_healthy
     environment:
+      JAVA_OPTS: ${GATEWAY_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
       LOGGING_FILE_NAME: /var/log/tamagotchi/api-gateway.log
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
@@ -98,6 +100,12 @@ services:
       PORT: 8080
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 150s
 
   user-management-service:
     image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-3.0.0}
@@ -333,6 +341,7 @@ services:
       log-init:
         condition: service_completed_successfully
     environment:
+      JAVA_OPTS: ${BROKER_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
       PORT: 8070
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
@@ -361,9 +370,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8070/health > /dev/null || exit 1"]
       interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 40s
+      timeout: 5s
+      retries: 6
+      start_period: 150s
 
   prometheus:
     image: prom/prometheus:v3.16.0

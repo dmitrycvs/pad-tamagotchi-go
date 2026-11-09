@@ -1,17 +1,16 @@
 # Lab 4 step 1 handoff for Dmitrii
 
-Checked 2026-11-09. All five implementation PRs are merged into `develop`.
-Broker **1.0.0 is published**, and its contract/code are ready for Dmitrii's
-Topics work. The other four services have main release PRs prepared; the common
-integration remains draft until those images are published and its pointers
-are refreshed to released commits. Other owners' instrumentation is tracked
-separately. No protected branch was bypassed.
+Checked 2026-11-09. All five implementation PRs and all five image releases
+are complete. The CPR records the released commits and image versions; final
+integration PR #56 still needs its manual develop merge. Broker history repair
+#3 remains a separate main review/merge before the next Topics release. Other
+owners' missing instrumentation remains tracked in issue 55.
 
 Dmitrii can branch from `message-broker`'s `develop` using
 `feat/message-broker/AddTopics`. Preserve the existing request/reply contract
-and reserved metric names while adding `domain.event` topics. For the current
-full-stack integration, use the CPR branch `feat/shared/AddMessageBroker` until
-PR #56 is merged.
+and reserved metric names while adding `domain.event` topics. The integration
+branch `feat/shared/AddMessageBroker` has the full published-image stack until
+CPR #56 merges.
 
 ## Image and contract
 
@@ -41,43 +40,33 @@ merged feature branches are deleted by default (`delete_branch_on_merge=true`).
 Main allows merge commits only; feature squash merges remain available on develop.
 Protected main/develop branches retain their deletion restriction.
 
-## Source and review sequence
+## Released sources and integration
 
-| Repository | Develop PR | Tested source commit | Release target |
+| Service | Image | Released commit | Main PR |
 | --- | --- | --- | --- |
-| Message Broker | [#1](https://github.com/MaxKostov/message-broker/pull/1) | `8f63750` (released main) | 1.0.0 |
-| API Gateway | [#14](https://github.com/MaxKostov/api-gateway/pull/14) | `126a961` (merged develop) | 3.1.0 |
-| Service Discovery | [#8](https://github.com/MaxKostov/service-discovery/pull/8) | `cd62305` (merged develop) | 3.4.0 |
-| Guild | [#7](https://github.com/MaxKostov/guild-service/pull/7) | `7950135` (merged develop) | 3.1.0 |
-| Package Registry | [#6](https://github.com/MaxKostov/package-registry-service/pull/6) | `bb1c331` (merged develop) | 3.1.0 |
+| message-broker | `maxkostov/message-broker:1.0.0` | `8f63750` | [#2](https://github.com/MaxKostov/message-broker/pull/2) |
+| api-gateway | `dmitrycvs/api-gateway:3.1.0` | `e465371` | [#16](https://github.com/MaxKostov/api-gateway/pull/16) |
+| service-discovery | `maxkostov/service-discovery:3.4.0` | `c4ed878` | [#10](https://github.com/MaxKostov/service-discovery/pull/10) |
+| guild-service | `maxkostov/guild-service:3.1.0` | `79e4ce9` | [#8](https://github.com/MaxKostov/guild-service/pull/8) |
+| package-registry-service | `maxkostov/package-registry-service:3.1.0` | `b536a4e` | [#7](https://github.com/MaxKostov/package-registry-service/pull/7) |
 
-Broker release [PR #2](https://github.com/MaxKostov/message-broker/pull/2) is
-merged into main after both required approvals; auto-merge remained disabled.
-The release commit `8f63750`, versioned image and Git tag are verified. Every
-merged source tree was compared with its tested feature tree and is identical.
+All versioned images were pulled and their OCI revision/version labels checked
+against the Git tags and CPR gitlinks. Immutable digests are recorded in
+[lab4-releases.json](lab4-releases.json). The merged runtime trees match the
+implementations previously tested locally and in CI.
 
-The four remaining release PRs are ready for manual review/merge:
-
-- [API Gateway 3.1.0](https://github.com/MaxKostov/api-gateway/pull/16)
-- [Service Discovery 3.4.0](https://github.com/MaxKostov/service-discovery/pull/10)
-- [Guild Service 3.1.0](https://github.com/MaxKostov/guild-service/pull/8)
-- [Package Registry Service 3.1.0](https://github.com/MaxKostov/package-registry-service/pull/7)
-
-Merge main release PRs with **Create a merge commit**, keeping develop ancestry.
-Feature PRs still squash into develop. Gateway #16 and Discovery #10 replace
-the conflicted #15/#9 releases; their resolved trees exactly match tested
-develop. Existing main review/CI protections remain active.
+Main releases use **Create a merge commit**; feature PRs squash into develop.
+Gateway #16 and Discovery #10 resolved their old squash-history conflicts.
+Guild develop also contains its main release through a subsequent history sync.
+Keep main/develop; delete merged feature branches.
 
 Broker [history repair #3](https://github.com/MaxKostov/message-broker/pull/3)
-joins its already-released main/develop ancestry before the next Topics
-release. Its runtime/build tree is unchanged from v1.0.0; documentation/history
-updates skip image republishing. The image/tag remain immutable.
+is still open. It joins the already-released 1.0.0 histories before the next
+Topics release; runtime/build inputs and the published image/tag remain
+unchanged. Its documentation/history-only update skips image publication.
 
-After their main merges, wait for versioned image publication, verify the
-configured namespaces/tags, and refresh the CPR gitlinks to the released main
-commits. Then ready and squash the CPR integration PR into develop. Keep
-main/develop and delete merged feature branches. Do not merge the integration
-draft against unpublished image tags.
+The remaining integration action is to review/merge
+[CPR #56](https://github.com/dmitrycvs/pad-tamagotchi-go/pull/56) into develop.
 The user's original checkout and its uncommitted README edits were preserved.
 
 ## Where to build the next steps
@@ -146,20 +135,22 @@ start. Grafana provisions Prometheus, Loki, and the 12-panel dashboard.
 | Guild vet + full PostgreSQL/Redis race suite | Pass, 79.3% aggregate coverage |
 | Package Registry vet + full PostgreSQL race suite | Pass, 83.2% aggregate coverage |
 | Service CI test/coverage and Docker builds | All five PRs green |
-| Exact Dockerfiles / release | All five built; broker 1.0.0 publication and running release image verified |
+| Exact Dockerfiles / release | All five published images, source labels, Git tags and CPR release pointers verified |
 | Prometheus / Alloy / Loki config validation | Pass with the pinned images |
 | Full `docker compose ... up -d --wait` | Exit 0; 25 running containers, two completed initialization jobs |
-| Postman regression | 46 requests, 100 assertions, zero failures; repeated against the published broker image |
+| Postman regression | 46 requests, 100 assertions, zero failures against all five published releases |
 | Actual nested client call | Guild POST → broker → User GET 200 → Guild 201, same request ID |
 | All configured peer transport contracts | 18 edges pass; selected-instance/error-origin checks pass |
 | Grafana | Dashboard exists; actual Prometheus proxy returns request rates and Loki proxy returns logs for five services |
 | Registered `/metrics` | 7/19 pass; 12 owner targets return 404 |
 
-The first cold-stack Postman attempt hit the User service's own 504 during
-login; subsequent auth-dependent requests then failed. Controlled broker logs
-show the upstream 504 was forwarded unchanged. After startup settled, login took
-1.4 seconds and the complete 100-assertion run passed. Docker had 3.8 GiB RAM
-for the whole stack; the README recommends 8 GiB. No failed write was replayed.
+On the 4 GiB Docker VM, the first all-amd64 rollout exhausted free memory and
+swap; the gateway's shorter image health window expired before its slow
+emulated startup completed, and several requests timed out. Compose now gives
+the three Java services a 150-second startup grace and explicit heap/processor
+budgets. Full published-image startup and the complete 100-assertion regression
+then passed without changing business deadlines or replica counts. The README
+still recommends 8 GiB for the full stack. No failed write was replayed.
 
 The Postman run creates uniquely named test users and a guild. Existing databases
 and Redis data were retained. Tokens stayed in memory; stored result summaries
@@ -167,34 +158,36 @@ contain statuses, assertions and timings without credentials.
 
 ## Open work
 
-1. Broker 1.0.0 is published and its gitlink now points to released main. Obtain
-   the four other services' required main release reviews, publish their target
-   versions, and refresh those gitlinks to release SHAs.
+1. Review/merge CPR #56 into develop. All five service images and release
+   pointers are now available. Broker history repair #3 still needs its manual
+   main review/merge before the next Topics release.
 2. Other owners must add `/metrics` and shared log files for their six services:
    [readiness table](../monitoring/metrics-readiness.md),
    [posted owner follow-up](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55#issuecomment-6743394529).
-3. Those six source repos are inaccessible to MaxKostov (GitHub 404, no pending
-   invitations). Grant intended access for a full source-level client audit.
-4. The smoke/transport checks do not cover complete battle settlement, raid
-   reward distribution, proximity notifications, or real Firebase delivery.
-   Those deeper business flows remain additional integration work.
-5. Implement Topics and gRPC in their agreed later steps; preserve the metric
-   names above. The Lab 4 PDF was absent from this checkout; implementation scope
-   follows the supplied task text.
+3. The six teammate source repos were inaccessible to MaxKostov during the
+   source audit (GitHub 404, no pending invitations). Their owners must grant
+   intended access for a full source-level client audit.
+4. Smoke/transport checks do not cover complete battle settlement, raid
+   rewards, proximity notifications or real Firebase delivery. Those deeper
+   business-flow scenarios remain additional integration work.
+5. Topics (Dmitrii) and gRPC (Denis) are the agreed later steps. Preserve the
+   contract and metric names above. The Lab 4 PDF was absent from this checkout;
+   implementation scope follows the supplied task text.
 
 ## Current local stack
 
-The tested integration worktree is `/private/tmp/pad-lab4-broker` on
-`feat/shared/AddMessageBroker`. The broker now runs the published `maxkostov/message-broker:1.0.0` image.
-Four other source images still use local-only `*:lab4-local` tags until their
-reviews/releases complete; they are not tagged as published releases. ARM images for the
-four existing Java/Go services run natively locally; CI verifies amd64 release
-builds. Broker's local image is amd64. No published version was overwritten.
+The integration worktree is `/private/tmp/pad-lab4-broker` on
+`feat/shared/AddMessageBroker`. The stack now uses only the published images in
+`docker-compose.yml`, all on linux/amd64; no local-build image override is used.
+Existing databases, Redis, monitoring data and shared log files are retained.
+Compose bounds each Java heap to 256 MiB and reports two available processors per JVM by
+default, with per-component JAVA_OPTS overrides. Java health checks have a
+150-second startup grace for AMD64 emulation. Business request timeouts and
+replica counts retain their documented values.
 
-The original `.env` is read in place. The ignored, mode-0600 `.env.local` contains
-a newly generated Grafana password plus nonsecret test overrides; existing
-credentials were not duplicated. `docker-compose.local.yml` is ignored and selects
-the local images. Reproduce the verified stack with:
+The original `.env` is read in place. The ignored mode-0600 `.env.local` holds
+its generated Grafana password and nonsecret image/realtime overrides; existing
+credentials were not duplicated. For this verified local environment:
 
 ```sh
 export CPR_ENV_FILE=/absolute/path/to/your/existing/.env
@@ -202,9 +195,12 @@ cd /private/tmp/pad-lab4-broker
 docker compose \
   --env-file "$CPR_ENV_FILE" \
   --env-file .env.local \
-  -f docker-compose.yml -f docker-compose.local.yml up -d --wait
+  -f docker-compose.yml up -d --wait
 ```
 
-Open Grafana at `http://localhost:3000/d/tamagotchi-lab4`; username `admin`,
-password in `.env.local`. Prometheus targets: `http://localhost:9090/targets`.
-Published-image startup will use the regular `.env` after the releases exist.
+For a fresh checkout after integration merge, configure `.env` using the updated
+`.env.example` (including the image tags and Grafana password), then use normal
+`docker compose up -d --wait`.
+
+Grafana: `http://localhost:3000/d/tamagotchi-lab4`, username `admin`, password in
+`.env.local`. Prometheus: `http://localhost:9090/targets`.

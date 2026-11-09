@@ -24,6 +24,9 @@ remain explicit placeholders. Port 9070 is reserved without a listener.
 The private repo has `main` and `develop`, the exact Service Discovery rulesets,
 and invitations for huntrese, dmitrycvs, aXeeDENt and filipel2004. GitHub review
 requirements remain active: one develop approval, two main approvals.
+Per the user's preference, merges remain manual (`allow_auto_merge=false`);
+merged feature branches are deleted by default (`delete_branch_on_merge=true`).
+Protected main/develop branches retain their deletion restriction.
 
 ## Source and review sequence
 

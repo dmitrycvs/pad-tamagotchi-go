@@ -4,3 +4,6 @@
 .env.local
 
 postman/*.local.postman_environment.json
+
+# Local source-image verification overrides
+docker-compose.local.yml

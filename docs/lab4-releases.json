@@ -1,0 +1,35 @@
+{
+  "verified_date": "2026-11-09",
+  "releases": [
+    {
+      "service": "message-broker",
+      "image": "maxkostov/message-broker:1.0.0",
+      "source_commit": "8f63750a925e1dd1d9501cef86a1b9e860cc13a0",
+      "digest": "sha256:877db821a784d77489927be894711c8625549c85dd1a1e09757bde65eaaaddf0"
+    },
+    {
+      "service": "api-gateway",
+      "image": "dmitrycvs/api-gateway:3.1.0",
+      "source_commit": "e4653713dfe9daf6ab76275ba5497a0637e90f7a",
+      "digest": "sha256:aaa70822376b378e5e7fccc6cd0a9029d7af46e6860585744dc22aaf2fea0aba"
+    },
+    {
+      "service": "service-discovery",
+      "image": "maxkostov/service-discovery:3.4.0",
+      "source_commit": "c4ed878dbb7e196c3c7fe4c6c79c0e943eb5c83a",
+      "digest": "sha256:aea51cbc655b2c71e43d97723149847af307f97738122933243025947e63495c"
+    },
+    {
+      "service": "guild-service",
+      "image": "maxkostov/guild-service:3.1.0",
+      "source_commit": "79e4ce9cdf0c0cd870fceae02d464d76b403e12b",
+      "digest": "sha256:95ba2e7280294ac38fac153d4e7023cdd416f68cdb32233fff6b72c4f936c7f8"
+    },
+    {
+      "service": "package-registry-service",
+      "image": "maxkostov/package-registry-service:3.1.0",
+      "source_commit": "b536a4e0e15e1dc54153b43cb581480f08e8c951",
+      "digest": "sha256:f9ade9db371d826a451bfb1440bc2114cb31397f5b5eda67c8d8257f913395f3"
+    }
+  ]
+}

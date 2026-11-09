@@ -1,0 +1,1780 @@
+{
+  "info": {
+    "name": "Lab 3 regression through Lab 4 broker",
+    "description": "Existing 18-request Lab 2/3 stack regression, followed by broker health/metrics/error/envelope checks and one transport contract per configured service-to-service edge. Generated credentials remain runtime variables; never export secrets. Edge checks prove delivery to a target instance, not execution of the calling service HTTP client.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 Gateway health",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Gateway healthy\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/health"
+      },
+      "response": []
+    },
+    {
+      "name": "02 Register test user",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const suffix = Date.now().toString() + Math.floor(Math.random() * 10000).toString();",
+              "pm.collectionVariables.set(\"run_id\", suffix);",
+              "pm.collectionVariables.set(\"run_username\", \"lab4_\" + suffix);",
+              "pm.collectionVariables.set(\"run_email\", \"lab4_\" + suffix + \"@example.invalid\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"User ID returned\", () => pm.expect(body.user_id).to.be.a(\"string\").and.not.empty);",
+              "  pm.collectionVariables.set(\"user_id\", body.user_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/users/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{run_username}}\",\n  \"email\": \"{{run_email}}\",\n  \"password\": \"{{run_password}}\",\n  \"package_id\": \"{{package_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Creates a unique test account on every collection run."
+      },
+      "response": []
+    },
+    {
+      "name": "03 Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"JWT returned\", () => pm.expect(body.jwt).to.be.a(\"string\").and.not.empty);",
+              "  pm.collectionVariables.set(\"jwt\", body.jwt);",
+              "  pm.collectionVariables.set(\"user_id\", body.user_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/users/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{run_email}}\",\n  \"password\": \"{{run_password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "04 Gateway identity",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Correct identity\", () => {",
+              "    pm.expect(body.type).to.eql(\"user\");",
+              "    pm.expect(body.sub).to.eql(pm.collectionVariables.get(\"user_id\"));",
+              "  });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/auth/me"
+      },
+      "response": []
+    },
+    {
+      "name": "05 User profile",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test(\"Correct user\", () => pm.expect(pm.response.json().user_id).to.eql(pm.collectionVariables.get(\"user_id\")));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/users/{{user_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "06 User currency",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/users/{{user_id}}/currency"
+      },
+      "response": []
+    },
+    {
+      "name": "07 Tamagotchi type matrix",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/tamagotchis/types"
+      },
+      "response": []
+    },
+    {
+      "name": "08 User Tamagotchis",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/tamagotchis?owner_id={{user_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "09 Create guild",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Guild ID returned\", () => pm.expect(body.guild_id).to.be.a(\"string\").and.not.empty);",
+              "  pm.collectionVariables.set(\"guild_id\", body.guild_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/guilds",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Lab 4 Postman {{run_id}}\",\n  \"description\": \"Integration smoke test\",\n  \"owner_id\": \"{{user_id}}\",\n  \"event_id\": \"{{$guid}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10 Get guild",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/guilds/{{guild_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "11 Guild WebSocket negotiation",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  pm.test(\"Direct WebSocket URL returned\", () => pm.expect(body.url).to.match(/^wss?:\\/\\//));",
+              "  pm.collectionVariables.set(\"guild_ws_url\", body.url);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/realtime/guilds/{{guild_id}}",
+        "description": "Verifies negotiation; open the returned URL in Postman to test the direct WebSocket connection."
+      },
+      "response": []
+    },
+    {
+      "name": "12 Nearby map users",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test(\"Nearby list returned\", () => pm.expect(pm.response.json().nearby).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/map/nearby?user_id={{user_id}}&radius_meters=100"
+      },
+      "response": []
+    },
+    {
+      "name": "13 Active raids",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test(\"Raid list returned\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/raids?status=active"
+      },
+      "response": []
+    },
+    {
+      "name": "14 Notification types",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/notifications/types"
+      },
+      "response": []
+    },
+    {
+      "name": "15 User notifications",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/notifications?user_id={{user_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "16 Package Registry routing",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Response came from service\", () => pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.not.eql(\"true\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/packages/{{missing_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "17 Battle routing",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Response came from service\", () => pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.not.eql(\"true\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/battles/{{missing_id}}"
+      },
+      "response": []
+    },
+    {
+      "name": "18 Map without JWT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Gateway rejected request\", () => pm.expect(pm.response.headers.get(\"X-Gateway-Error\")).to.eql(\"true\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/map/nearby?user_id={{user_id}}&radius_meters=100"
+      },
+      "response": []
+    },
+    {
+      "name": "19 Broker health",
+      "request": {
+        "method": "GET",
+        "url": "{{broker_url}}/health",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Shared health service\", () => pm.expect(pm.response.json().service).to.eql(\"message-broker\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20 Broker metrics",
+      "request": {
+        "method": "GET",
+        "url": "{{broker_url}}/metrics",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Prometheus data\", () => pm.expect(pm.response.text()).to.include(\"broker_in_flight\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21 Missing broker credentials",
+      "request": {
+        "method": "GET",
+        "url": "{{broker_url}}/q/guild-service/api/guilds/{{missing_id}}",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));",
+              "pm.test(\"Broker error marker\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.eql(\"true\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22 Anonymous peer types",
+      "request": {
+        "method": "GET",
+        "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis/types",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23 Request envelope public delivery",
+      "request": {
+        "method": "POST",
+        "url": "{{broker_url}}/api/queues/tamagotchi-service/requests",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request_id\": \"postman-envelope\",\n  \"method\": \"GET\",\n  \"path\": \"/api/tamagotchis/types\",\n  \"query\": \"\",\n  \"headers\": {},\n  \"body\": null\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Chosen instance\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "24 Malformed envelope",
+      "request": {
+        "method": "POST",
+        "url": "{{broker_url}}/api/queues/guild-service/requests",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "25 Every configured service-to-service transport edge",
+      "item": [
+        {
+          "name": "user-management-service -> notification-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/notification-service/api/notifications/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"user-management-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "battle-service -> tamagotchi-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"battle-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "battle-service -> user-management-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/user-management-service/api/users/{{missing_id}}",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"battle-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "battle-service -> package-registry-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/package-registry-service/api/packages/{{missing_id}}/stat-definitions",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"battle-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "battle-service -> notification-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/notification-service/api/notifications/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"battle-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "tamagotchi-service -> user-management-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/user-management-service/api/users/{{missing_id}}",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"tamagotchi-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "tamagotchi-service -> package-registry-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/package-registry-service/api/packages/{{missing_id}}/stat-definitions",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"tamagotchi-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "tamagotchi-service -> notification-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/notification-service/api/notifications/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"tamagotchi-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "map-service -> user-management-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/user-management-service/api/users/{{missing_id}}",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"map-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "map-service -> notification-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/notification-service/api/notifications/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"map-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "monster-raid-service -> guild-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/guild-service/api/guilds/{{missing_id}}/members/{{missing_id}}",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"monster-raid-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "monster-raid-service -> tamagotchi-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"monster-raid-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "monster-raid-service -> package-registry-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/package-registry-service/api/packages/{{missing_id}}/stat-definitions",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"monster-raid-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "monster-raid-service -> notification-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/notification-service/api/notifications/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"monster-raid-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "guild-service -> user-management-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/user-management-service/api/users/{{missing_id}}",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"guild-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "guild-service -> notification-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/notification-service/api/notifications/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"guild-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "package-registry-service -> user-management-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/user-management-service/api/users/{{missing_id}}",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"package-registry-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "package-registry-service -> tamagotchi-service",
+          "request": {
+            "method": "GET",
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis/types",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"service_jwt_secret\") || pm.collectionVariables.get(\"service_jwt_secret\");",
+                  "if (!secret) { throw new Error(\"Set secret service_jwt_secret in a local Postman environment; never export it.\"); }",
+                  "function b64(value) { return CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(JSON.stringify(value))).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\"); }",
+                  "const header = b64({alg:\"HS256\",typ:\"JWT\"});",
+                  "const claims = {sub:\"package-registry-service\",roles:[\"service\"],exp:Math.floor(Date.now()/1000)+300};",
+                  "const encoded = header + \".\" + b64(claims);",
+                  "const signature = CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(encoded, secret)).replace(/=/g, \"\").replace(/\\+/g, \"-\").replace(/\\//g, \"_\");",
+                  "pm.collectionVariables.set(\"service_jwt\", encoded + \".\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Broker chose a registered target\", () => pm.expect(pm.response.headers.get(\"X-Upstream-Instance\")).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Target response, not broker error\", () => pm.expect(pm.response.headers.get(\"X-Broker-Error\")).to.not.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "26 Infrastructure metrics",
+      "item": [
+        {
+          "name": "Gateway GET /metrics",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/metrics",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Shared metrics\", () => pm.expect(pm.response.text()).to.include(\"tamagotchi_in_flight\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway POST /metrics",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/metrics",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 405\", () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Service Discovery GET /metrics",
+          "request": {
+            "method": "GET",
+            "url": "http://localhost:8761/metrics",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Shared metrics\", () => pm.expect(pm.response.text()).to.include(\"tamagotchi_in_flight\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Service Discovery POST /metrics",
+          "request": {
+            "method": "POST",
+            "url": "http://localhost:8761/metrics",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 405\", () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "package_id",
+      "value": "00000000-0000-0000-0000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "missing_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "type": "string"
+    },
+    {
+      "key": "run_password",
+      "value": "PostmanTest123!",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guild_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guild_ws_url",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "broker_url",
+      "value": "http://localhost:8070",
+      "type": "string"
+    },
+    {
+      "key": "service_jwt_secret",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "service_jwt",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

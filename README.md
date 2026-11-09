@@ -14,7 +14,7 @@ The critical constraint of this system is that **packages are not uniform**. One
 
 The platform is split into **8 microservices**, each owning a distinct domain and its own database. No service reads another service's tables — all cross-service data flows through REST calls or asynchronous events.
 
-In front of them sits the **API Gateway**, the single entry point: every REST request, from a client or from another service, passes through it. The gateway authorizes the request and routes it to the owning service.
+The **API Gateway** authenticates external clients. In Lab 4 it relays business HTTP to the **Message Broker**, which selects the service instance and runs the Lab 3 circuit breaker. Services call peers directly through the broker. Discovery registration/heartbeats and negotiated realtime sockets retain their direct control paths.
 
 ---
 
@@ -40,7 +40,7 @@ Services are paired by coupling: each owner holds the two services that talk to 
 | **Tatarintev Denis** | Map, Monster Raid        | **C#** (ASP.NET Core + EF Core) | PostgreSQL + PostGIS | REST, SignalR for live raid state, idempotent operations                   | NetTopologySuite gives EF Core first-class geometry types over PostGIS, so proximity queries use real spatial indexes instead of hand-rolled distance math over every user. SignalR handles the raid clicker's live HP fan-out with reconnection and group management built in, which matters because raid damage arrives concurrently from many guild members — every write is idempotent via `event_id` so a reconnecting client can retry without double-counting.                                                                           |
 | **Obrijan Filip**    | User Management, Battle  | **C#** (ASP.NET Core + EF Core) | PostgreSQL           | REST with JWT issuance, SignalR for live battle state, atomic transactions | ASP.NET Core ships identity, password hashing and JWT bearer authentication as first-class components, so the platform's auth root needs very little hand-rolled security code — the part most expensive to get wrong. EF Core transactions over PostgreSQL keep the global-currency ledger ACID, which matters because battle rewards debit one user and credit another. SignalR carries live turn updates with reconnection and group management built in, so a dropped phone connection mid-battle recovers without custom plumbing.          |
 
-| **Cvasiuc Dmitrii** | API Gateway | **Java** (Spring Boot 4 + Spring Cloud Gateway, WebFlux) | — (stateless) | REST reverse proxy, JWT authorization, WebSocket negotiation, timeouts & concurrency limits | Spring Cloud Gateway runs on Netty's non-blocking event loop, so thousands of proxied requests in flight cost a handful of threads, and per-route timeouts and request cancellation are built in. Doing authorization once at the edge removes duplicate JWT handling from eight services written in two languages. The gateway holds no state, so it scales horizontally behind any load balancer. Java was the language banned for the services in Lab 1 and is required for the gateway in Lab 2. |
+| **Cvasiuc Dmitrii** | API Gateway | **Java** (Spring Boot 4 + Spring Cloud Gateway, WebFlux) | — (stateless) | REST reverse proxy, JWT authorization, WebSocket negotiation, timeouts & concurrency limits | Spring Cloud Gateway runs on Netty's non-blocking event loop, so thousands of proxied requests in flight cost a handful of threads, and per-route timeouts and request cancellation are built in. Doing authorization once at the edge removes duplicate JWT handling from eight services written in two languages. The gateway stores no persistent business state; its registry cache and direct-mode breakers are local to each process, so replicas can run behind a load balancer. Java was the language banned for the services in Lab 1 and is required for the gateway in Lab 2. |
 
 > **Note:** The team satisfies the two-language requirement with **Go** (Costov Maxim, Cvasiuc Dmitrii) and **C#** (Tatarintev Denis, Obrijan Filip). Both halves speak the same REST/JSON contract documented below, so the language split is invisible across service boundaries — the only cross-stack concern is keeping WebSocket frame shapes identical between Go's `gorilla/websocket` and .NET's SignalR, which the contract pins down explicitly.
 
@@ -48,25 +48,43 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 ## Architecture Diagram
 
-<a href="./src/application_diagram.png">
-  <img src="./src/application_diagram.png" alt="Architecture Diagram" width="100%">
-</a>
+```mermaid
+flowchart TB
+    Clients[Clients / Postman] -->|Business REST and realtime negotiation| Gateway[API Gateway :8080 / JWT]
+    Gateway -->|Trusted identity / q service| Broker[Message Broker :8070 / queues / round-robin / breaker]
+    Broker <-->|Business REST / selected instance| Services[Eight business services / two replicas each]
+    Services -->|Peer requests / service JWT| Broker
+    Clients <-->|Direct WebSocket / SignalR| Services
+    Gateway -.->|Realtime instance cache / registration| Discovery[Service Discovery :8761]
+    Broker -.->|Cache / registration / removal| Discovery
+    Services -.->|Registration / heartbeat| Discovery
+    Discovery -.->|Health and load checks| Services
+    Services --> Database[(Separate PostgreSQL databases)]
+    Services <--> Redis[Redis / Guild events]
+    Broker --> Discord[Discord alerts]
+    Discovery --> Discord
+    Prometheus[Prometheus :9090] -.->|HTTP SD / registry snapshot| Broker
+    Prometheus -->|Scrape /metrics per instance| Broker
+    Prometheus -->|Scrape /metrics per instance| Services
+    Logs[Shared /var/log/tamagotchi] --> Alloy --> Loki
+    Gateway --> Logs
+    Broker --> Logs
+    Services -->|Guild / Package Registry files| Logs
+    Grafana[Grafana :3000] --> Prometheus
+    Grafana --> Loki
+```
 
-[Open full-size diagram](./src/application_diagram.png) · source: [`application_diagram.svg`](./src/application_diagram.svg)
-
-Clients and services send every REST call to the **API Gateway**, which checks
-the JWT and forwards the request round-robin to one registered instance of the
-owning service. Each business service runs as several replicas; every replica
-registers with **Service Discovery**, sends heartbeats and exposes `/health`,
-which Service Discovery polls. The gateway reads the instance list every 5 s,
-trips a circuit breaker on an instance that keeps failing and removes it from
-the registry; health alerts, trips and removals are posted to **Discord**.
-WebSockets connect directly to the instance chosen during gateway negotiation.
-The dependencies between services are listed below.
+Broker owns business HTTP instance selection and per-instance breakers. Gateway
+keeps JWT authorization, outer task limits and realtime negotiation. Service
+Discovery still owns registrations, expiry and health polling. Broker and
+Gateway refresh their respective registry caches every 5 seconds. Guild chat
+continues across replicas through Redis; WebSockets bypass the broker.
+Monitoring currently receives files from Broker, Gateway, Discovery, Guild and
+Package Registry; remaining owners' instrumentation is tracked separately.
 
 **How the services communicate:**
 
-- **API Gateway** is the single entry point: clients and services alike send REST calls to it, and it validates the JWT and forwards the request to the owning service with trusted identity headers in place of the token. For live connections it only negotiates: the client gets back a URL to the service's WebSocket and connects directly.
+- **API Gateway** accepts external client REST, validates JWTs and relays trusted identity to the broker. It negotiates direct realtime sockets. **Message Broker** owns synchronous request queues, round-robin instance delivery and the Lab 3 circuit breaker; services call it through `/q/{target-service}`.
 - **Notification Service** is the delivery boundary — every service except Package Registry publishes events to it, and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
 - **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle credits global currency and XP through it, and Package Registry grants moderator/admin roles through it.
 - **Package Registry Service** is the configuration authority — Battle and Monster Raid read stat-interpretation rules from it before computing damage, and it supplies the stat definitions used when a new Tamagotchi is created.
@@ -158,7 +176,7 @@ Owns the **edge of the system**: routing every REST request to the service that 
 
 ## Authentication
 
-All requests enter through the **API Gateway** (`http://localhost:8080`). Endpoints marked **Headers: `Authorization: Bearer <jwt>`** require a valid user JWT issued by the **User Management Service**. The token carries:
+External business requests enter through the **API Gateway** (`http://localhost:8080`). Service-to-service requests use the **Message Broker** (`http://message-broker:8070/q/{target-service}`), which validates service JWTs and emits the same trusted headers. Endpoints marked **Headers: `Authorization: Bearer <jwt>`** require a valid user JWT issued by the **User Management Service**. The token carries:
 
 - `sub` — the user UUID
 - `package_id` — the package the session belongs to
@@ -1478,8 +1496,8 @@ Any endpoint can additionally return the errors below. Each carries the header `
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **6 GB** of free RAM — nineteen containers by default: the gateway, Service Discovery, two replicas of each of the eight services and PostgreSQL
-- Ports **5432**, **8080**, **8082–8093** and **8761** free on the host
+- Roughly **8 GB** of free RAM for the complete application and monitoring stack (25 long-running containers plus two initialization/readiness jobs)
+- Ports **3000**, **5432**, **8070**, **8080**, **8082–8093**, **8761**, **9070** and **9090** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1617,6 +1635,10 @@ Each service also logs every request with its `request_id`, so
 between the two container prefixes.
 
 ### Circuit breaker
+
+Lab 4 moves business HTTP instance selection and this unchanged state machine
+from Gateway to [Message Broker](./message-broker/README.md). Gateway's direct
+mode below remains available when MESSAGE_BROKER_URL is empty.
 
 **Every component that calls another service follows this rule** (Lab 3): the
 gateway for each upstream, and each service for each peer it calls. One
@@ -1778,7 +1800,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, `message-broker`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix        | Purpose                                | Example                                     |
@@ -1940,3 +1962,55 @@ Validate registration and health in the running main stack through
 `http://localhost:8761/api/registry/services`. Check Guild chat with
 `scripts/realtime-smoke.mjs` as described above. All services run from published
 images; these checks do not build or launch a separate stack.
+
+
+## Lab 4: broker and monitoring foundation
+
+The broker contract is [message-broker/README.md](./message-broker/README.md#shared-contract).
+It defines request/reply shapes, queues, errors and the reserved Topics
+(Dmitrii) / gRPC (Denis) sections. Java 21 + Spring MVC/Tomcat serves HTTP on
+8070; 9070 is reserved and has no gRPC listener in step 1.
+
+All 18 configured peer base URLs now use
+`http://message-broker:8070/q/{target-compose-service-name}`. Appended `/api/...`
+paths, method, query, raw body and upstream responses stay unchanged. Existing
+service JWTs are validated by the broker, which replaces untrusted identity
+headers with the shared gateway trust contract. Public peer reads such as
+Tamagotchi types retain their anonymous access. `API_GATEWAY_URL` remains the
+Guild realtime identity endpoint; registration stays on Service Discovery.
+
+Gateway's `MESSAGE_BROKER_URL` sends external business HTTP through the same
+broker delivery path and skips its old HTTP instance/breaker filters. It keeps
+JWT checks and realtime instance ownership. Its outer deadline is 12 seconds,
+above the broker's 10-second delivery deadline and services' 8-second deadline.
+A broker failure returns `{ "error": "..." }` with `X-Broker-Error: true`;
+503 also supplies `Retry-After: 1`. Upstream errors remain unchanged.
+
+Monitoring configuration and the metric names reserved for later steps live in
+[monitoring/README.md](./monitoring/README.md). Set `GRAFANA_ADMIN_PASSWORD` in
+`.env`, then `docker compose up -d --wait`. Java heaps default to 256 MiB per
+process, with two available processors reported per JVM and a 150-second startup health
+grace for emulation; `*_JAVA_OPTS` settings in .env.example are configurable. Open Grafana at
+`http://localhost:3000` and Prometheus targets at `http://localhost:9090/targets`.
+The broker's HTTP SD adapter exposes every registry instance to Prometheus;
+missing `/metrics` endpoints are visible as down targets. Alloy tails the
+shared log folder and forwards it to Loki. `GET /health` and `GET /metrics`
+remain available under delivery saturation.
+
+Run the existing Lab 3 regression through the broker, plus health/error and
+all configured peer-transport checks, with
+[postman/lab3-broker.postman_collection.json](./postman/lab3-broker.postman_collection.json).
+Set `service_jwt_secret` only in a local Postman environment. Its 18 edge checks
+verify broker transport and response ownership; they do not by themselves prove
+every calling service's HTTP client implementation. The handoff records actual
+stack results and inaccessible teammate source repositories.
+
+Released images: Message Broker **1.0.0**, API Gateway **3.1.0**, Guild **3.1.0**,
+Package Registry **3.1.0**, Service Discovery **3.4.0**. All versioned images,
+Git tags and released submodule commits were verified. Exact image digests:
+[docs/lab4-releases.json](./docs/lab4-releases.json). The integration PR now
+records the release commits rather than feature/develop snapshots.
+
+Current evidence, remaining owner instrumentation and the Topics/gRPC handoff:
+[docs/lab4-handoff.md](./docs/lab4-handoff.md),
+[tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).

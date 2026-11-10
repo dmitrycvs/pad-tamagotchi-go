@@ -103,3 +103,36 @@ the Discord sender, one thread each. The shared state and its locks are listed i
    friendlier `RESOURCE_EXHAUSTED` would need admission control before the executor.
 5. The broker → Consumer channel is plaintext inside the Compose network, like HTTP. Trust still
    rests on `X-Gateway-Secret`.
+
+## Verification (2026-11-10)
+
+Each repository's suite and coverage gate, run locally:
+
+| Repo | Tests | Line coverage |
+| --- | --- | --- |
+| message-broker | 96 | 94% (generated gRPC code excluded) |
+| api-gateway | 93 | gate met |
+| service-discovery | 61 | gate met |
+| pad-map-service | 87 | 90.7% |
+| pad-monster-raid-service | 89 | 90.7% |
+
+End to end on Compose with the locally built step 3 images, plus published User Management 3.0.0
+and Notification 4.0.0 (2 map replicas):
+
+- Map registers `grpc_port: 9000`. The broker logs both worker pools and `gRPC server listening port=9070`.
+- `GET /api/map/nearby`, `POST /api/map/locations` and `GET /api/raids` through the gateway reached
+  map and raid with `transport=grpc`, round-robin across both map replicas.
+- Map's relationship lookup came into the broker over gRPC (`Broker.Call`) and went out to User
+  Management over HTTP. That is the fallback for a service that has not moved.
+- A proximity event was published with `Broker.Publish` to `map.nearby_player_detected` and
+  delivered to Notification (202). `GET /api/topics` then showed `published: 1, delivered: 1`.
+- `GET /api/admin/logs?since=1h` with an admin token returned a zip of 8 files: the per-service
+  folders of map and raid, plus the flat files of gateway, discovery, broker and notification. A
+  user token and a service token got 403, `since=yesterday` got 400, `GET /api/topics` without a
+  token got 401.
+- Map `/metrics` served the four `tamagotchi_*` metrics.
+
+Notification must be **4.0.0** or later to subscribe to these topics, so the Compose default was
+raised from 2.2.0. Alloy and Loki could not be run in this check because of a broken local
+Docker image, so the new `**/*.log` glob in `monitoring/alloy/config.alloy` has not been tested
+against a running Alloy yet. Check it in Grafana Explore with `{service="map-service"}`.

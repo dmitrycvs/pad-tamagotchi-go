@@ -2109,6 +2109,3 @@ examples.
 | API Gateway | 3.3.0 |
 | Service Discovery | 3.6.0 |
 | Map / Monster Raid | 2.3.0 |
-
-Handoff for step 4 (delivery, retries, thread pools, open items):
-[docs/lab4-step3-handoff.md](./docs/lab4-step3-handoff.md).

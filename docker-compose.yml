@@ -30,7 +30,7 @@ services:
       retries: 10
 
   service-discovery:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.6.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.5.0}
     platform: linux/amd64
     restart: unless-stopped
     volumes:
@@ -58,7 +58,7 @@ services:
       start_period: 150s
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.3.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.2.0}
     platform: linux/amd64
     restart: unless-stopped
     volumes:
@@ -155,7 +155,7 @@ services:
       - "8082-8084:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.2.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -216,7 +216,7 @@ services:
       replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.3.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -254,7 +254,7 @@ services:
       - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.3.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -363,7 +363,7 @@ services:
       - tamagotchi-logs:/var/log/tamagotchi
 
   message-broker:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.2.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

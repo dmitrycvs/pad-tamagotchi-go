@@ -30,7 +30,7 @@ services:
       retries: 10
 
   service-discovery:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.4.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.6.0}
     platform: linux/amd64
     restart: unless-stopped
     volumes:
@@ -58,7 +58,7 @@ services:
       start_period: 150s
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.1.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
     volumes:
@@ -69,6 +69,8 @@ services:
     environment:
       JAVA_OPTS: ${GATEWAY_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
       LOGGING_FILE_NAME: /var/log/tamagotchi/api-gateway.log
+      # Served to admins as a zip by GET /api/admin/logs.
+      LOG_ARCHIVE_DIR: /var/log/tamagotchi
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
@@ -214,7 +216,7 @@ services:
       replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.2.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -222,7 +224,18 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      # JSON log lines in /var/log/tamagotchi/map-service/<instance_id>.log.
+      LOG_DIR: /var/log/tamagotchi
+      # Consumer server for the broker (registered as grpc_port); peer calls and topic events
+      # (map.nearby_player_detected) go to the broker over gRPC.
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
       DATABASE_URL: Host=postgres;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
@@ -241,7 +254,7 @@ services:
       - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.2.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -249,7 +262,18 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      # JSON log lines in /var/log/tamagotchi/monster-raid-service/<instance_id>.log.
+      LOG_DIR: /var/log/tamagotchi
+      # Consumer server for the broker (registered as grpc_port); peer calls and topic events
+      # (raid.started) go to the broker over gRPC.
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
       DATABASE_URL: Host=postgres;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
@@ -339,7 +363,7 @@ services:
       - tamagotchi-logs:/var/log/tamagotchi
 
   message-broker:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -357,6 +381,10 @@ services:
       BROKER_CONNECT_TIMEOUT: ${BROKER_CONNECT_TIMEOUT:-2s}
       BROKER_MAX_CONCURRENT_REQUESTS: ${BROKER_MAX_CONCURRENT_REQUESTS:-200}
       BROKER_QUEUE_CAPACITY: ${BROKER_QUEUE_CAPACITY:-100}
+      # Thread-per-request pools; 0 = BROKER_MAX_CONCURRENT_REQUESTS + 16.
+      BROKER_WORKER_THREADS: ${BROKER_WORKER_THREADS:-0}
+      BROKER_GRPC_THREADS: ${BROKER_GRPC_THREADS:-0}
+      BROKER_GRPC_PORT: 9070
       DISCOVERY_REFRESH_INTERVAL: ${DISCOVERY_REFRESH_INTERVAL:-5s}
       DISCOVERY_HEARTBEAT_INTERVAL: ${DISCOVERY_HEARTBEAT_INTERVAL:-10s}
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
@@ -370,7 +398,7 @@ services:
       LOG_DIR: /var/log/tamagotchi
     ports:
       - "127.0.0.1:8070:8070"
-      # Reserved for Denis's step 3 implementation; no gRPC listener in step 1.
+      # gRPC (proto/broker.proto): services call Broker here; the broker calls their port 9000.
       - "127.0.0.1:9070:9070"
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi

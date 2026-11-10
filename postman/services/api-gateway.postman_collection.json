@@ -791,6 +791,98 @@
 			]
 		},
 		{
+			"name": "Admin log download (Lab 4)",
+			"item": [
+				{
+					"name": "Download map-service logs of the last hour (admin) → zip",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('200 with a zip archive', () => {",
+									"  pm.response.to.have.status(200);",
+									"  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/zip');",
+									"  pm.expect(pm.response.headers.get('Content-Disposition')).to.match(/attachment; filename=\"tamagotchi-logs-.*\\.zip\"/);",
+									"  pm.expect(Number(pm.response.headers.get('X-Log-Files'))).to.be.above(0);",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_jwt}}", "type": "string" }] },
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/api/admin/logs?service=map-service&since=1h",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "logs"],
+							"query": [{ "key": "service", "value": "map-service" }, { "key": "since", "value": "1h" }]
+						},
+						"description": "Zip of /var/log/tamagotchi/map-service/<instance_id>.log files written in the last hour. Use Send and Download to save it."
+					},
+					"response": []
+				},
+				{
+					"name": "Download logs without the admin role → 403",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('403 from the gateway', () => {",
+									"  pm.response.to.have.status(403);",
+									"  pm.expect(pm.response.headers.get('X-Gateway-Error')).to.eql('true');",
+									"  pm.expect(pm.response.json().error).to.eql('This endpoint requires the admin role.');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{jwt}}", "type": "string" }] },
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/api/admin/logs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "logs"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Download logs with a bad filter → 400",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('400 for a filter that is not a time', () => {",
+									"  pm.response.to.have.status(400);",
+									"  pm.expect(pm.response.json().error).to.include('Invalid since filter');",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_jwt}}", "type": "string" }] },
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/api/admin/logs?since=yesterday",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "logs"],
+							"query": [{ "key": "since", "value": "yesterday" }]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "Errors",
 			"item": [
 				{

@@ -1995,7 +1995,7 @@ images; these checks do not build or launch a separate stack.
 The broker contract is [message-broker/README.md](./message-broker/README.md#shared-contract).
 It defines request/reply shapes, queues, errors and the reserved Topics
 (Dmitrii) / gRPC (Denis) sections. Java 21 + Spring MVC/Tomcat serves HTTP on
-8070; 9070 is reserved and has no gRPC listener in step 1.
+8070 and gRPC on 9070 (step 3, see below).
 
 All 18 configured peer base URLs now use
 `http://message-broker:8070/q/{target-compose-service-name}`. Appended `/api/...`
@@ -2050,7 +2050,9 @@ request queues. Names are `domain.event`. Full contract:
 | Topic | Publisher | Subscribers |
 | --- | --- | --- |
 | `tamagotchi.captured` | Tamagotchi (`MESSAGE_BROKER_URL` set) | Notification |
-| `user.friend_request_received`, `map.nearby_player_detected`, `battle.request_received`, `guild.invitation_sent`, `raid.started` | to be moved by each owner (they still call `/api/notifications/publish`) | Notification |
+| `map.nearby_player_detected` | Map 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `raid.started` | Monster Raid 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `user.friend_request_received`, `battle.request_received`, `guild.invitation_sent` | to be moved by each owner (they still call `/api/notifications/publish`) | Notification |
 
 Request queues stay for calls that need an answer from a known service. Internal
 service-to-service routes are no longer exposed by the gateway (404); services
@@ -2062,3 +2064,51 @@ Tamagotchi and Notification also write their logs to the shared
 Current evidence, remaining owner instrumentation and the Topics/gRPC handoff:
 [docs/lab4-handoff.md](./docs/lab4-handoff.md),
 [tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).
+
+### Step 3: logs, thread-per-request, topic list and gRPC (Lab 4)
+
+**Log download (Grade 4).** Services write JSON log lines to the shared `tamagotchi-logs` volume
+at `/var/log/tamagotchi/<service>/<instance_id>.log`; Map and Monster Raid 2.3.0 do so. Older
+flat files (`<service>.log`, `<service>-<instance_id>.log`) stay valid. Admins download the
+matching files as one zip:
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_JWT" -o logs.zip \
+  "http://localhost:8080/api/admin/logs?service=map-service&instance=&since=1h"
+```
+
+`service` and `instance` are exact names; `since` is an ISO-8601 instant or `30s`/`15m`/`2h`/`1d`.
+The endpoint answers 400 for bad filters, 401 without a token, 403 without the admin role and 404
+when nothing matches ([gateway README](./api-gateway/README.md#downloading-logs-lab-4)). Alloy now
+tails the per-service folders too (`/var/log/tamagotchi/**/*.log`). Map and Monster Raid also
+serve `GET /metrics` with the shared `tamagotchi_*` names.
+
+**Thread-per-request (Grade 7).** The broker runs each HTTP request on one thread of a bounded
+pool (`broker-http-N`), and each gRPC call on a second one (`broker-grpc-N`). Sizes come from
+`BROKER_WORKER_THREADS` / `BROKER_GRPC_THREADS`; the default is the delivery limit + 16, and both
+pools are logged at startup. The shared state in the request path and its locks are listed in the
+[broker README, "Concurrency model"](./message-broker/README.md#concurrency-model).
+
+**Topic list (Grade 7).** `GET http://localhost:8070/api/topics` (service JWT) lists every known
+topic with its subscribers and message counts
+([broker README](./message-broker/README.md#topics), Postman `25 List topics`).
+
+**gRPC (Grade 8).** Contract: [`message-broker/proto/broker.proto`](./message-broker/proto/broker.proto),
+documented in the [broker README, "gRPC"](./message-broker/README.md#grpc) with Go and C#
+examples.
+
+- Services call `Broker.Call` / `Broker.Publish` on `message-broker:9070`.
+- The broker calls `Consumer.Handle` / `Consumer.Deliver` on port 9000 of every instance that
+  registered `grpc_port` (Service Discovery 3.6.0), and falls back to HTTP for the others.
+- The balancer, circuit breaker, identity headers and error shapes are the same on both transports.
+- Map and Monster Raid have moved, both directions. The gateway still calls the broker over HTTP.
+
+| Image | Version |
+| --- | --- |
+| Message Broker | 1.2.0 |
+| API Gateway | 3.3.0 |
+| Service Discovery | 3.6.0 |
+| Map / Monster Raid | 2.3.0 |
+
+Handoff for step 4 (delivery, retries, thread pools, open items):
+[docs/lab4-step3-handoff.md](./docs/lab4-step3-handoff.md).

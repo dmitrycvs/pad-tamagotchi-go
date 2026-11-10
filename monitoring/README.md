@@ -47,6 +47,9 @@ exclude health/scrape requests. Avoid paths, request IDs and user IDs in labels.
 
 The `tamagotchi-logs` named volume is mounted at `/var/log/tamagotchi`.
 Broker, Guild, Package Registry, Tamagotchi and Notification write stdout and per-instance files there.
+Map and Monster Raid (2.3.0) write JSON lines in the agreed Lab 4 layout,
+`/var/log/tamagotchi/<service>/<instance_id>.log` (rotated to `.log.1` at 20 MB). The gateway
+serves every layout to admins as a zip through `GET /api/admin/logs?service=&instance=&since=`.
 Spring's standard `LOGGING_FILE_NAME` also captures Gateway and Discovery logs
 without changing their message format. Their default Compose replica count is
 one; do not scale these two with a shared filename without adding an instance
@@ -55,7 +58,7 @@ suffix. Broker and Go filenames already include instance IDs.
 `log-init` initializes the directory before producers start. UID/GID 1000 owns
 it, and mode 1777 lets the pre-existing non-root Java images create their own
 files while retaining file ownership. Log files are readable by the collector.
-Alloy mounts the folder read-only, tails `.log` files, labels service from the
+Alloy mounts the folder read-only, tails `.log` files (also in per-service folders, `**/*.log`), labels service from the
 filename, and sends batches to Loki. Its read positions survive restart in the
 `alloy-data` volume. No Docker socket or container privileges are required.
 The Loki server stores incoming logs; Alloy performs filesystem tailing.

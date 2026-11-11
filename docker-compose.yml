@@ -30,7 +30,7 @@ services:
       retries: 10
 
   service-discovery:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.5.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.6.0}
     platform: linux/amd64
     restart: unless-stopped
     volumes:
@@ -58,7 +58,7 @@ services:
       start_period: 150s
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.2.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
     volumes:
@@ -191,6 +191,10 @@ services:
       LOG_DIR: /var/log/tamagotchi
       # Events go to broker topics (tamagotchi.captured) instead of NOTIFICATION_SERVICE_URL.
       MESSAGE_BROKER_URL: http://message-broker:8070
+      # gRPC (4.1.0+): Consumer server registered as grpc_port; peer calls and events go to the
+      # broker over gRPC. Older images ignore both.
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: message-broker:9070
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
@@ -221,6 +225,8 @@ services:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
       LOG_DIR: /var/log/tamagotchi
+      # gRPC (4.1.0+): Consumer server registered as grpc_port, so topic events arrive over gRPC.
+      GRPC_PORT: 9000
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
@@ -236,7 +242,7 @@ services:
       replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.2.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -274,7 +280,7 @@ services:
       - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.2.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -383,7 +389,7 @@ services:
       - tamagotchi-logs:/var/log/tamagotchi
 
   message-broker:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.1.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:

@@ -1555,17 +1555,17 @@ matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
-| **API Gateway** | `dmitrycvs/api-gateway:3.2.0`               | **8080** |
-| User Management       | `filipel2004/user-management-service:3.0.0` | —              |
-| Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
+| **API Gateway** | `dmitrycvs/api-gateway:3.3.0`               | **8080** |
+| User Management       | `filipel2004/user-management-service:4.0.0` | —              |
+| Battle                | `filipel2004/battle-service:4.0.0`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:4.0.0`        | —              |
 | Notification          | `dmitrycvs/notification-service:4.0.0`      | —              |
-| Map                   | `takima/pad-map-service:2.2.0`              | 8085–8087      |
-| Monster Raid          | `takima/pad-monster-raid-service:2.2.0`     | 8088–8090      |
+| Map                   | `takima/pad-map-service:2.3.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.3.0`     | 8088–8090      |
 | Guild                 | `maxkostov/guild-service:3.1.0`             | 8091–8093      |
 | Package Registry      | `maxkostov/package-registry-service:3.1.0`  | —              |
-| **Service Discovery** | `maxkostov/service-discovery:3.5.0`         | **8761** |
-| **Message Broker**    | `maxkostov/message-broker:1.1.0`            | **8070**, 9070 |
+| **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
+| **Message Broker**    | `maxkostov/message-broker:1.3.0`            | **8070**, 9070 |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,

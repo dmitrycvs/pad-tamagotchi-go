@@ -1565,7 +1565,7 @@ matching `TAG_*` to `dev` in `.env`.
 | Guild                 | `maxkostov/guild-service:3.2.0`             | 8091–8093      |
 | Package Registry      | `maxkostov/package-registry-service:3.2.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
-| **Message Broker**    | `maxkostov/message-broker:1.3.0`            | **8070**, 9070 |
+| **Message Broker**    | `maxkostov/message-broker:1.3.1`            | **8070**, 9070 |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -2032,7 +2032,7 @@ verify broker transport and response ownership; they do not by themselves prove
 every calling service's HTTP client implementation. The handoff records actual
 stack results and inaccessible teammate source repositories.
 
-Released images: Message Broker **1.3.0**, API Gateway **3.3.0**, Service Discovery
+Released images: Message Broker **1.3.1**, API Gateway **3.3.0**, Service Discovery
 **3.6.0**, Tamagotchi and Notification **4.1.0**, User Management and Battle **4.0.0**,
 Map and Monster Raid **2.3.0**, Guild and Package Registry **3.2.0**. Each submodule
 points at the released commit on `main`. Exact image digests:
@@ -2117,7 +2117,7 @@ examples.
 
 ### Step 4: durable queues, dead letters, failover and load-based routing (Lab 4)
 
-Message Broker **1.3.0** ([broker README](./message-broker/README.md), sections Durable queues,
+Message Broker **1.3.1** ([broker README](./message-broker/README.md), sections Durable queues,
 Dead letter channel, High availability, Load-based routing).
 
 **Durable queues (Grade 9).** Every message is a row in the `message_broker` database on the stack's

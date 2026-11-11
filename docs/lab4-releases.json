@@ -3,9 +3,9 @@
   "releases": [
     {
       "service": "message-broker",
-      "image": "maxkostov/message-broker:1.3.0",
-      "source_commit": "c0f0630bdda39a6a9eea262a575840ceaf31f6fd",
-      "digest": "sha256:01fdcec3d29e8b5fdf54fd2ee90637a1d250b68ae069f0ecd67eb4ce40e22e54"
+      "image": "maxkostov/message-broker:1.3.1",
+      "source_commit": "44dfc8e0ac9a211158ebbff67193a78e0e9a964a",
+      "digest": "sha256:6689a912b0d52da402970331c0c9d0de2a86f6d24b5f3fe5674bb94910b22995"
     },
     {
       "service": "api-gateway",

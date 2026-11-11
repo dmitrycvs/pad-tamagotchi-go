@@ -12,9 +12,9 @@ Players raise Tamagotchis inside a package of their choosing, walk around the re
 
 The critical constraint of this system is that **packages are not uniform**. One package may model its pets with hunger, happiness and tiredness; another with energy, mood, discipline and creativity. The backend therefore separates *globally meaningful* state (identity, level, combat type, global currency, guild membership) from *package-local* state (health statistics, growth mechanics, local currency), and never forces the two to share a schema.
 
-The platform is split into **8 microservices**, each owning a distinct domain and its own database. No service reads another service's tables — all cross-service data flows through REST calls or asynchronous events.
+The platform is split into **8 microservices**, each owning a distinct domain and its own database. No service reads another service's tables — all cross-service data flows through the Message Broker, as gRPC requests or topic events.
 
-The **API Gateway** authenticates external clients. In Lab 4 it relays business HTTP to the **Message Broker**, which selects the service instance and runs the Lab 3 circuit breaker. Services call peers directly through the broker. Discovery registration/heartbeats and negotiated realtime sockets retain their direct control paths.
+The **API Gateway** authenticates external clients and relays their requests to the **Message Broker** (Lab 4). The broker queues every request and event durably, routes it to the least-loaded healthy instance over gRPC, reroutes it when an instance fails, and moves undeliverable messages to a dead letter channel. Prometheus, Loki and Grafana monitor the whole system.
 
 ---
 
@@ -50,42 +50,85 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 ```mermaid
 flowchart TB
-    Clients[Clients / Postman] -->|Business REST and realtime negotiation| Gateway[API Gateway :8080 / JWT]
-    Gateway -->|Trusted identity / q service| Broker[Message Broker :8070 / queues / round-robin / breaker]
-    Broker <-->|Business REST / selected instance| Services[Eight business services / two replicas each]
-    Services -->|Peer requests / service JWT| Broker
-    Clients <-->|Direct WebSocket / SignalR| Services
-    Gateway -.->|Realtime instance cache / registration| Discovery[Service Discovery :8761]
-    Broker -.->|Cache / registration / removal| Discovery
-    Services -.->|Registration / heartbeat| Discovery
-    Discovery -.->|Health and load checks| Services
-    Services --> Database[(Separate PostgreSQL databases)]
-    Services <--> Redis[Redis / Guild events]
-    Broker --> Discord[Discord alerts]
-    Discovery --> Discord
-    Prometheus[Prometheus :9090] -.->|HTTP SD / registry snapshot| Broker
-    Prometheus -->|Scrape /metrics per instance| Broker
-    Prometheus -->|Scrape /metrics per instance| Services
-    Logs[Shared /var/log/tamagotchi] --> Alloy --> Loki
-    Gateway --> Logs
-    Broker --> Logs
-    Services -->|Guild / Package Registry files| Logs
-    Grafana[Grafana :3000] --> Prometheus
+    Clients["Clients / Postman"]
+
+    Gateway["API Gateway :8080<br/>JWT, internal routes 404,<br/>admin log download"]
+
+    subgraph BrokerBox["Message Broker :8070 HTTP / :9070 gRPC"]
+        Queues["Request queues /q/{service}<br/>subscriber-based"]
+        Topics["Topic queues<br/>/api/topics/{topic}/events"]
+        Routing["Least-load balancer<br/>circuit breaker + reroute"]
+        DLC["Dead letter channel<br/>/api/dead-letters"]
+    end
+
+    BrokerDB[("PostgreSQL message_broker<br/>durable messages")]
+
+    Services["Eight business services, two replicas each<br/>User Management, Battle, Tamagotchi, Notification,<br/>Map, Monster Raid, Guild, Package Registry<br/>gRPC Consumer :9000"]
+
+    Discord["Discord alerts"]
+    Discovery["Service Discovery :8761<br/>instances, topics, grpc_port, load"]
+    ServiceDBs[("Separate PostgreSQL databases")]
+    Redis[("Redis<br/>guild events")]
+
+    subgraph Monitoring
+        Prometheus["Prometheus :9090"]
+        Logs["Shared volume<br/>/var/log/tamagotchi"]
+        Alloy --> Loki
+        Grafana["Grafana :3000"]
+    end
+
+    Clients -->|"REST + JWT"| Gateway
+    Gateway -->|"HTTP, trusted identity"| Queues
+    Clients <-.->|"WebSocket / SignalR after negotiation"| Services
+    Queues --> Routing
+    Topics --> Routing
+    Routing -->|"gRPC Consumer.Handle / Deliver :9000<br/>HTTP fallback"| Services
+    Services -->|"gRPC Broker.Call / Broker.Publish"| BrokerBox
+    BrokerBox --> BrokerDB
+    Routing -->|"after 5 failed attempts"| DLC
+    Services -.->|"register + heartbeat"| Discovery
+    Discovery -.->|"health and load polls"| Services
+    BrokerBox -.->|"instance cache, 5 s"| Discovery
+    Gateway -.->|"realtime instance cache"| Discovery
+    Services --> ServiceDBs
+    Services <-->|"Guild chat"| Redis
+    Prometheus -.->|"HTTP SD via broker"| BrokerBox
+    Prometheus -->|"scrape /metrics"| Services
+    Gateway & BrokerBox & Services -->|"JSON logs"| Logs
+    Logs --> Alloy
+    Logs -->|"zip download"| Gateway
+    BrokerBox & Discovery -.-> Discord
+    Grafana --> Prometheus
     Grafana --> Loki
 ```
 
-Broker owns business HTTP instance selection and per-instance breakers. Gateway
-keeps JWT authorization, outer task limits and realtime negotiation. Service
-Discovery still owns registrations, expiry and health polling. Broker and
-Gateway refresh their respective registry caches every 5 seconds. Guild chat
-continues across replicas through Redis; WebSockets bypass the broker.
-Monitoring currently receives files from Broker, Gateway, Discovery, Guild and
-Package Registry; remaining owners' instrumentation is tracked separately.
+**How a request travels (Lab 4).** A client calls the API Gateway with a JWT. The gateway checks it,
+refuses internal service-to-service routes with 404, and relays the request to the Message Broker's
+queue for the target service (`/q/{service}`). The broker stores the message in its PostgreSQL
+database, picks the least-loaded healthy instance and sends it over gRPC (`Consumer.Handle` on port
+9000), or HTTP for an instance that registered no `grpc_port`. If that instance fails or its breaker
+is open, the broker reroutes the message to another instance in the same request.
+
+**How services talk to each other.** A service that needs an answer calls `Broker.Call` on
+`message-broker:9070`. A service that only announces something fires an event with `Broker.Publish`
+to a topic such as `battle.request_received` and does not know who listens. Every service whose
+Service Discovery registration lists that topic gets one copy (`Consumer.Deliver`). Copies that
+cannot be delivered are retried with backoff and, after 5 attempts or a permanent rejection, go to
+the dead letter channel, where they can be listed and retried.
+
+**What stays direct.** Registration, heartbeats and health/load polls go straight to Service
+Discovery. Realtime sockets (guild chat, live battles and raids) are negotiated through the gateway
+and then connect straight to the replica that owns them; guild chat crosses replicas through Redis.
+
+**Monitoring.** Prometheus finds every instance through the broker's HTTP service-discovery adapter
+and scrapes its `/metrics`. Every service writes JSON log lines to the shared `/var/log/tamagotchi`
+volume; Alloy ships them to Loki, and admins download them as a zip through the gateway. Grafana
+shows both. The broker and Service Discovery send Discord alerts.
 
 **How the services communicate:**
 
-- **API Gateway** accepts external client REST, validates JWTs and relays trusted identity to the broker. It negotiates direct realtime sockets. **Message Broker** owns synchronous request queues, round-robin instance delivery and the Lab 3 circuit breaker; services call it through `/q/{target-service}`.
-- **Notification Service** is the delivery boundary — every service except Package Registry publishes events to it, and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
+- **API Gateway** accepts external client REST, validates JWTs and relays trusted identity to the broker. It negotiates direct realtime sockets and serves the admin log download. **Message Broker** owns request queues, topic queues, durable delivery, the dead letter channel, least-load instance selection and the Lab 3 circuit breaker.
+- **Notification Service** is the delivery boundary. It subscribes to the six notification topics (`user.friend_request_received`, `battle.request_received`, `tamagotchi.captured`, `map.nearby_player_detected`, `raid.started`, `guild.invitation_sent`), and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
 - **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle credits global currency and XP through it, and Package Registry grants moderator/admin roles through it.
 - **Package Registry Service** is the configuration authority — Battle and Monster Raid read stat-interpretation rules from it before computing damage, and it supplies the stat definitions used when a new Tamagotchi is created.
 - **Monster Raid Service** asks Guild Service *"is this player a member of the guild this raid is bound to?"* before admitting anyone to the boss clicker, and exchanges monster definitions with Package Registry in both directions.

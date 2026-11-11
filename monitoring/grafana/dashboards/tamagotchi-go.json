@@ -289,7 +289,7 @@
     },
     {
       "id": 9,
-      "title": "Queue depth (later step)",
+      "title": "Queue depth",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -323,7 +323,7 @@
     },
     {
       "id": 10,
-      "title": "Reroutes (later step)",
+      "title": "Reroutes",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -357,7 +357,7 @@
     },
     {
       "id": 11,
-      "title": "Dead letters (later step)",
+      "title": "Dead letters",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",

@@ -1,35 +1,71 @@
 {
-  "verified_date": "2026-11-09",
+  "verified_date": "2026-11-11",
   "releases": [
     {
       "service": "message-broker",
-      "image": "maxkostov/message-broker:1.0.0",
-      "source_commit": "8f63750a925e1dd1d9501cef86a1b9e860cc13a0",
-      "digest": "sha256:877db821a784d77489927be894711c8625549c85dd1a1e09757bde65eaaaddf0"
+      "image": "maxkostov/message-broker:1.3.0",
+      "source_commit": "c0f0630bdda39a6a9eea262a575840ceaf31f6fd",
+      "digest": "sha256:01fdcec3d29e8b5fdf54fd2ee90637a1d250b68ae069f0ecd67eb4ce40e22e54"
     },
     {
       "service": "api-gateway",
-      "image": "dmitrycvs/api-gateway:3.1.0",
-      "source_commit": "e4653713dfe9daf6ab76275ba5497a0637e90f7a",
-      "digest": "sha256:aaa70822376b378e5e7fccc6cd0a9029d7af46e6860585744dc22aaf2fea0aba"
+      "image": "dmitrycvs/api-gateway:3.3.0",
+      "source_commit": "663e87943d63abb562541d1706d8533099fe673e",
+      "digest": "sha256:25ac0a62f8290fa6aaeda4c4c4c93eab4ac61e21a98f24124926daaeee7476c1"
     },
     {
       "service": "service-discovery",
-      "image": "maxkostov/service-discovery:3.4.0",
-      "source_commit": "c4ed878dbb7e196c3c7fe4c6c79c0e943eb5c83a",
-      "digest": "sha256:aea51cbc655b2c71e43d97723149847af307f97738122933243025947e63495c"
+      "image": "maxkostov/service-discovery:3.6.0",
+      "source_commit": "350b8803eeba6c52f53083ede51eac269f90b1bc",
+      "digest": "sha256:2666feca2d99335f130039a82d1526fefbb58a319574821939e8c5fa1ea6bbc1"
+    },
+    {
+      "service": "tamagotchi-service",
+      "image": "dmitrycvs/tamagotchi-service:4.1.0",
+      "source_commit": "aede86b62d8cb01ace31ba3bdc1394e3d4fc9fda",
+      "digest": "sha256:a0888fc29eb909114da6746f763cce1c7914d04d87cf73d66b59a4e2b958e511"
+    },
+    {
+      "service": "notification-service",
+      "image": "dmitrycvs/notification-service:4.1.0",
+      "source_commit": "b5e5bed6221537e560db4b6e25143897ece4ccf0",
+      "digest": "sha256:09a8dc70cddb2c4fb3cc7a5b6bddbff2f8637c696dc2b7aa75d1d44b6d62ccb5"
+    },
+    {
+      "service": "user-management-service",
+      "image": "filipel2004/user-management-service:4.0.0",
+      "source_commit": "7968ab80f0f8d0020b6d1097f1aba6fdc6b1484a",
+      "digest": "sha256:1590bfb5652ac66b0beae3b828e7caa50ede7aac10ec21f5ea32d2ac177abc42"
+    },
+    {
+      "service": "battle-service",
+      "image": "filipel2004/battle-service:4.0.0",
+      "source_commit": "b872dae066b04193292b740d270abd25c1d0c016",
+      "digest": "sha256:25d0b2d81271128dd0a89d61b17670d4c62dd88f143a7e926819e5b05271e139"
+    },
+    {
+      "service": "pad-map-service",
+      "image": "takima/pad-map-service:2.3.0",
+      "source_commit": "7495ca4d0195144b120e61fc101ff697f8caa2d7",
+      "digest": "sha256:772b151b3fb57dd57a8917acedf1bdff7ddd409a7053b965a26709216b054d54"
+    },
+    {
+      "service": "pad-monster-raid-service",
+      "image": "takima/pad-monster-raid-service:2.3.0",
+      "source_commit": "9fbcfd4be10c3a66e79d521a2603280943b96505",
+      "digest": "sha256:7af53f7c98211932a3d69efb7fe250b3e5e5c9ca256a15396f317aba7bac01de"
     },
     {
       "service": "guild-service",
-      "image": "maxkostov/guild-service:3.1.0",
-      "source_commit": "79e4ce9cdf0c0cd870fceae02d464d76b403e12b",
-      "digest": "sha256:95ba2e7280294ac38fac153d4e7023cdd416f68cdb32233fff6b72c4f936c7f8"
+      "image": "maxkostov/guild-service:3.2.0",
+      "source_commit": "565fb0018def86e6e302173a59e6ccb1823acb3a",
+      "digest": "sha256:ea774edec105d563882087f7508d810d743f0c9cb4f039135c3434f5f696d2a6"
     },
     {
       "service": "package-registry-service",
-      "image": "maxkostov/package-registry-service:3.1.0",
-      "source_commit": "b536a4e0e15e1dc54153b43cb581480f08e8c951",
-      "digest": "sha256:f9ade9db371d826a451bfb1440bc2114cb31397f5b5eda67c8d8257f913395f3"
+      "image": "maxkostov/package-registry-service:3.2.0",
+      "source_commit": "af1681ca311e258f28dbc8416cc61d3039d465ee",
+      "digest": "sha256:55d1160782c1a2bab244c6cfb4006a6171038cfb049690a33394801e3fb82c0d"
     }
   ]
 }

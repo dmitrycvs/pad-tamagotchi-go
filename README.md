@@ -1558,12 +1558,12 @@ matching `TAG_*` to `dev` in `.env`.
 | **API Gateway** | `dmitrycvs/api-gateway:3.3.0`               | **8080** |
 | User Management       | `filipel2004/user-management-service:4.0.0` | —              |
 | Battle                | `filipel2004/battle-service:4.0.0`          | 8082–8084      |
-| Tamagotchi            | `dmitrycvs/tamagotchi-service:4.0.0`        | —              |
-| Notification          | `dmitrycvs/notification-service:4.0.0`      | —              |
+| Tamagotchi            | `dmitrycvs/tamagotchi-service:4.1.0`        | —              |
+| Notification          | `dmitrycvs/notification-service:4.1.0`      | —              |
 | Map                   | `takima/pad-map-service:2.3.0`              | 8085–8087      |
 | Monster Raid          | `takima/pad-monster-raid-service:2.3.0`     | 8088–8090      |
-| Guild                 | `maxkostov/guild-service:3.1.0`             | 8091–8093      |
-| Package Registry      | `maxkostov/package-registry-service:3.1.0`  | —              |
+| Guild                 | `maxkostov/guild-service:3.2.0`             | 8091–8093      |
+| Package Registry      | `maxkostov/package-registry-service:3.2.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
 | **Message Broker**    | `maxkostov/message-broker:1.3.0`            | **8070**, 9070 |
 
@@ -2032,11 +2032,11 @@ verify broker transport and response ownership; they do not by themselves prove
 every calling service's HTTP client implementation. The handoff records actual
 stack results and inaccessible teammate source repositories.
 
-Released images: Message Broker **1.0.0**, API Gateway **3.1.0**, Guild **3.1.0**,
-Package Registry **3.1.0**, Service Discovery **3.4.0**. All versioned images,
-Git tags and released submodule commits were verified. Exact image digests:
-[docs/lab4-releases.json](./docs/lab4-releases.json). The integration PR now
-records the release commits rather than feature/develop snapshots.
+Released images: Message Broker **1.3.0**, API Gateway **3.3.0**, Service Discovery
+**3.6.0**, Tamagotchi and Notification **4.1.0**, User Management and Battle **4.0.0**,
+Map and Monster Raid **2.3.0**, Guild and Package Registry **3.2.0**. Each submodule
+points at the released commit on `main`. Exact image digests:
+[docs/lab4-releases.json](./docs/lab4-releases.json).
 
 ### Topics (Lab 4, step 2)
 
@@ -2050,12 +2050,12 @@ request queues. Names are `domain.event`. Full contract:
 
 | Topic | Publisher | Subscribers |
 | --- | --- | --- |
-| `tamagotchi.captured` | Tamagotchi (`MESSAGE_BROKER_URL` set) | Notification |
+| `tamagotchi.captured` | Tamagotchi 4.1.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
 | `map.nearby_player_detected` | Map 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
 | `raid.started` | Monster Raid 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
 | `user.friend_request_received` | User Management 4.0.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
 | `battle.request_received` | Battle 4.0.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
-| `guild.invitation_sent` | to be moved by its owner (still calls `/api/notifications/publish`) | Notification |
+| `guild.invitation_sent` | Guild 3.2.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
 
 Request queues stay for calls that need an answer from a known service. Internal
 service-to-service routes are no longer exposed by the gateway (404); services

@@ -2053,7 +2053,9 @@ request queues. Names are `domain.event`. Full contract:
 | `tamagotchi.captured` | Tamagotchi (`MESSAGE_BROKER_URL` set) | Notification |
 | `map.nearby_player_detected` | Map 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
 | `raid.started` | Monster Raid 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
-| `user.friend_request_received`, `battle.request_received`, `guild.invitation_sent` | to be moved by each owner (they still call `/api/notifications/publish`) | Notification |
+| `user.friend_request_received` | User Management 4.0.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `battle.request_received` | Battle 4.0.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `guild.invitation_sent` | to be moved by its owner (still calls `/api/notifications/publish`) | Notification |
 
 Request queues stay for calls that need an answer from a known service. Internal
 service-to-service routes are no longer exposed by the gateway (404); services
@@ -2102,7 +2104,8 @@ examples.
 - The broker calls `Consumer.Handle` / `Consumer.Deliver` on port 9000 of every instance that
   registered `grpc_port` (Service Discovery 3.6.0), and falls back to HTTP for the others.
 - The balancer, circuit breaker, identity headers and error shapes are the same on both transports.
-- Map and Monster Raid have moved, both directions. The gateway still calls the broker over HTTP.
+- Map, Monster Raid, User Management and Battle have moved, both directions. The gateway still calls
+  the broker over HTTP.
 
 | Image | Version |
 | --- | --- |
@@ -2110,3 +2113,45 @@ examples.
 | API Gateway | 3.3.0 |
 | Service Discovery | 3.6.0 |
 | Map / Monster Raid | 2.3.0 |
+| User Management / Battle | 4.0.0 |
+
+### Step 4: durable queues, dead letters, failover and load-based routing (Lab 4)
+
+Message Broker **1.3.0** ([broker README](./message-broker/README.md), sections Durable queues,
+Dead letter channel, High availability, Load-based routing).
+
+**Durable queues (Grade 9).** Every message is a row in the `message_broker` database on the stack's
+PostgreSQL (`DATABASE_URL` in Compose; the broker creates the database on volumes that predate it).
+A request is stored before it is sent, and a published event gets its 202 only after every
+subscriber's copy is stored. Event copies, and requests that carry an `event_id`, are redelivered
+with backoff (1, 2, 4, 8 s) until delivered, also after a broker restart: a message the broker was
+delivering when it stopped is picked up again when its lease (60 s) runs out. Delivery is at least
+once; every consumer drops duplicates by `event_id` (checked against Notification 4.0.0
+`/api/events` and `/api/notifications/publish`, Tamagotchi 4.0.0 `/xp` and User Management
+`/currency`: a repeated `event_id` is applied once).
+
+**Dead letter channel (Grade 9).** After 5 failed attempts, or when a subscriber rejects an event
+with a 4xx that cannot succeed later, the message goes to the dead letter channel, logged at ERROR
+(`Message dead-lettered ...`):
+
+```sh
+curl -H "Authorization: Bearer $SERVICE_JWT" "http://localhost:8070/api/dead-letters?queue=notification-service&since=2026-11-11T00:00:00Z"
+curl -X POST -H "Authorization: Bearer $SERVICE_JWT" http://localhost:8070/api/dead-letters/<id>/retry
+```
+
+**High availability (Grade 10).** When a send to an instance fails (connection error, timeout, 5xx)
+or its breaker is open, the broker sends the same message to another instance in the same request,
+never the same one twice, and logs `Rerouting queue=... from=<instance> to=<instance> reason="..."`.
+Only messages safe to repeat are rerouted: idempotent methods (GET, HEAD, OPTIONS, PUT, DELETE) and
+messages with an `event_id`.
+
+**Load-based routing (Grade 10).** Instead of round-robin, each message goes to the instance with
+the lowest `(in_flight from Service Discovery's health check + the broker's own calls in flight) /
+max_concurrent`; ties take turns. Every send logs `load=0.050 in_flight=4+1 max_concurrent=100`.
+
+**Metrics.** `broker_queue_depth{queue}`, `broker_reroutes_total{queue}` and
+`broker_dead_letters_total{queue}` fill the dashboard panels that were waiting for them, plus
+`broker_dead_letter_channel_size`, `broker_redeliveries_total` and `broker_chosen_instance_load`.
+
+User Management and Battle 4.0.0 serve `GET /metrics`, write `/var/log/tamagotchi/<service>/<instance_id>.log`,
+fire their notification topics and speak gRPC with the broker (`BROKER_GRPC_URL`, `GRPC_PORT: 9000`).

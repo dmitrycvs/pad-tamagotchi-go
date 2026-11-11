@@ -105,7 +105,7 @@ services:
       start_period: 150s
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-3.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -113,6 +113,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/user_management
       JWT_SECRET: ${JWT_SECRET}
@@ -123,11 +127,17 @@ services:
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+      # Lab 4: friend requests fire user.friend_request_received through the broker (gRPC Broker.Publish), the
+      # broker reaches each replica's gRPC Consumer on 9000, and logs also go to the shared volume.
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
+      GRPC_PORT: 9000
+      LOG_DIR: /var/log/tamagotchi
     deploy:
       replicas: ${REPLICAS_USER_MANAGEMENT:-2}
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-3.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -135,6 +145,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/battle
       JWT_SECRET: ${JWT_SECRET}
@@ -148,6 +162,12 @@ services:
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+      # Lab 4: peer calls go through Broker.Call (gRPC), battle requests fire battle.request_received, the broker
+      # reaches each replica's gRPC Consumer on 9000, and logs also go to the shared volume.
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
+      GRPC_PORT: 9000
+      LOG_DIR: /var/log/tamagotchi
     deploy:
       replicas: ${REPLICAS_BATTLE:-2}
     # One host port per replica (up to 3) for direct WebSocket connections.
@@ -369,6 +389,8 @@ services:
     depends_on:
       service-discovery:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
       log-init:
         condition: service_completed_successfully
     environment:
@@ -377,6 +399,11 @@ services:
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
+      # Lab 4 step 4: durable queues and the dead letter channel (broker 1.3.0+; older images ignore these).
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/message_broker
+      BROKER_RETRY_MAX_ATTEMPTS: ${BROKER_RETRY_MAX_ATTEMPTS:-5}
+      BROKER_RETRY_INITIAL_BACKOFF: ${BROKER_RETRY_INITIAL_BACKOFF:-1s}
+      BROKER_RETRY_MAX_BACKOFF: ${BROKER_RETRY_MAX_BACKOFF:-60s}
       BROKER_REQUEST_TIMEOUT: ${BROKER_REQUEST_TIMEOUT:-10s}
       BROKER_CONNECT_TIMEOUT: ${BROKER_CONNECT_TIMEOUT:-2s}
       BROKER_MAX_CONCURRENT_REQUESTS: ${BROKER_MAX_CONCURRENT_REQUESTS:-200}

@@ -56,7 +56,7 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"owner_id\": \"{{owner_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"Postman Tama {{$timestamp}}\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/postman-tama.png\",\n  \"stats\": {\n    \"hunger\": 100,\n    \"tiredness\": 0,\n    \"happiness\": 80\n  }\n}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{base_url}}/api/tamagotchis", "host": ["{{base_url}}"], "path": ["api", "tamagotchis"] },
+            "url": { "raw": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis", "host": ["{{broker_url}}"], "path": ["q", "tamagotchi-service", "api", "tamagotchis"] },
             "description": "Internal endpoint; requires service_jwt."
           },
           "response": [
@@ -118,7 +118,7 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"event_id\": \"{{$guid}}\",\n  \"amount\": 60,\n  \"reason\": \"battle_won\"\n}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{base_url}}/api/tamagotchis/{{tamagotchi_id}}/xp", "host": ["{{base_url}}"], "path": ["api", "tamagotchis", "{{tamagotchi_id}}", "xp"] },
+            "url": { "raw": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis/{{tamagotchi_id}}/xp", "host": ["{{broker_url}}"], "path": ["q", "tamagotchi-service", "api", "tamagotchis", "{{tamagotchi_id}}", "xp"] },
             "description": "Internal idempotent endpoint; requires service_jwt."
           },
           "response": [{ "name": "200 OK", "status": "OK", "code": 200, "header": [{ "key": "Content-Type", "value": "application/json" }], "cookie": [], "body": "{\n  \"tamagotchi_id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n  \"xp\": 60,\n  \"level\": 1,\n  \"leveled_up\": false\n}" }]
@@ -131,7 +131,7 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"event_id\": \"{{$guid}}\",\n  \"from_user_id\": \"{{owner_id}}\",\n  \"to_user_id\": \"{{other_user_id}}\"\n}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{base_url}}/api/tamagotchis/{{tamagotchi_id}}/transfer", "host": ["{{base_url}}"], "path": ["api", "tamagotchis", "{{tamagotchi_id}}", "transfer"] },
+            "url": { "raw": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis/{{tamagotchi_id}}/transfer", "host": ["{{broker_url}}"], "path": ["q", "tamagotchi-service", "api", "tamagotchis", "{{tamagotchi_id}}", "transfer"] },
             "description": "Internal idempotent endpoint; run last because ownership changes."
           },
           "response": [
@@ -173,6 +173,7 @@
       "});"
     ] } }],
   "variable": [
+    { "key": "broker_url", "value": "http://localhost:8070" },
     { "key": "registry_url", "value": "http://localhost:8761", "type": "string", "description": "Service Discovery, for the health checks." },
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },

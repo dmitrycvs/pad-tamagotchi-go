@@ -30,15 +30,22 @@ services:
       retries: 10
 
   service-discovery:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.3.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.6.0}
     platform: linux/amd64
     restart: unless-stopped
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
     environment:
+      JAVA_OPTS: ${DISCOVERY_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
       DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
       DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
       DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
+      LOGGING_FILE_NAME: /var/log/tamagotchi/service-discovery.log
       PORT: 8761
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
     ports:
@@ -46,27 +53,32 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8761/health > /dev/null || exit 1"]
       interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 150s
 
   api-gateway:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/api-gateway:${TAG_GATEWAY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
+    depends_on:
+      message-broker:
+        condition: service_healthy
     environment:
-      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
-      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
-      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
-      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
-      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
+      JAVA_OPTS: ${GATEWAY_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
+      LOGGING_FILE_NAME: /var/log/tamagotchi/api-gateway.log
+      # Served to admins as a zip by GET /api/admin/logs.
+      LOG_ARCHIVE_DIR: /var/log/tamagotchi
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_FORWARD_AUTHORIZATION: ${GATEWAY_FORWARD_AUTHORIZATION:-false}
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
-      GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-10s}
+      MESSAGE_BROKER_URL: http://message-broker:8070
+      GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-12s}
       GATEWAY_MAX_CONCURRENT_REQUESTS: ${GATEWAY_MAX_CONCURRENT_REQUESTS:-200}
-      # Upstreams are reached directly; every other service reaches its peers through the gateway.
+      # Route hosts name request queues; MESSAGE_BROKER_URL delegates HTTP selection and delivery.
       UPSTREAM_USER_MANAGEMENT_URL: http://user-management-service:8080
       UPSTREAM_BATTLE_URL: http://battle-service:8080
       UPSTREAM_TAMAGOTCHI_URL: http://tamagotchi-service:8080
@@ -85,47 +97,77 @@ services:
       PORT: 8080
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 150s
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-3.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/user_management
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+      # Lab 4: friend requests fire user.friend_request_received through the broker (gRPC Broker.Publish), the
+      # broker reaches each replica's gRPC Consumer on 9000, and logs also go to the shared volume.
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
+      GRPC_PORT: 9000
+      LOG_DIR: /var/log/tamagotchi
     deploy:
       replicas: ${REPLICAS_USER_MANAGEMENT:-2}
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-3.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/battle
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
-      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
-      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
+      USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
+      PACKAGE_REGISTRY_SERVICE_URL: http://message-broker:8070/q/package-registry-service
+      NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
+      # Lab 4: peer calls go through Broker.Call (gRPC), battle requests fire battle.request_received, the broker
+      # reaches each replica's gRPC Consumer on 9000, and logs also go to the shared volume.
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
+      GRPC_PORT: 9000
+      LOG_DIR: /var/log/tamagotchi
     deploy:
       replicas: ${REPLICAS_BATTLE:-2}
     # One host port per replica (up to 3) for direct WebSocket connections.
@@ -133,13 +175,26 @@ services:
       - "8082-8084:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-2.2.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      LOG_DIR: /var/log/tamagotchi
+      # Events go to broker topics (tamagotchi.captured) instead of NOTIFICATION_SERVICE_URL.
+      MESSAGE_BROKER_URL: http://message-broker:8070
+      # gRPC (4.1.0+): Consumer server registered as grpc_port; peer calls and events go to the
+      # broker over gRPC. Older images ignore both.
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: message-broker:9070
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
@@ -147,22 +202,31 @@ services:
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
-      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
-      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
+      PACKAGE_REGISTRY_SERVICE_URL: http://message-broker:8070/q/package-registry-service
+      NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     deploy:
       replicas: ${REPLICAS_TAMAGOTCHI:-2}
 
   notification-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-2.2.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      LOG_DIR: /var/log/tamagotchi
+      # gRPC (4.1.0+): Consumer server registered as grpc_port, so topic events arrive over gRPC.
+      GRPC_PORT: 9000
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
@@ -178,21 +242,34 @@ services:
       replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.2.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      # JSON log lines in /var/log/tamagotchi/map-service/<instance_id>.log.
+      LOG_DIR: /var/log/tamagotchi
+      # Consumer server for the broker (registered as grpc_port); peer calls and topic events
+      # (map.nearby_player_detected) go to the broker over gRPC.
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
       DATABASE_URL: Host=postgres;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
-      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
-      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
+      NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       PROXIMITY_THRESHOLD_METERS: ${PROXIMITY_THRESHOLD_METERS:-6}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
@@ -203,23 +280,36 @@ services:
       - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.2.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      # JSON log lines in /var/log/tamagotchi/monster-raid-service/<instance_id>.log.
+      LOG_DIR: /var/log/tamagotchi
+      # Consumer server for the broker (registered as grpc_port); peer calls and topic events
+      # (raid.started) go to the broker over gRPC.
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
+      MESSAGE_BROKER_URL: http://message-broker:8070
       DATABASE_URL: Host=postgres;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
-      GUILD_SERVICE_URL: http://api-gateway:8080
-      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
-      PACKAGE_REGISTRY_SERVICE_URL: http://api-gateway:8080
-      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      GUILD_SERVICE_URL: http://message-broker:8070/q/guild-service
+      TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
+      PACKAGE_REGISTRY_SERVICE_URL: http://message-broker:8070/q/package-registry-service
+      NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     deploy:
@@ -229,13 +319,18 @@ services:
       - "8088-8090:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      LOG_DIR: /var/log/tamagotchi
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
       CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
       CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
@@ -247,9 +342,11 @@ services:
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       API_GATEWAY_URL: http://api-gateway:8080
-      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
-      NOTIFICATION_SERVICE_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
+      NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
       PORT: 8080
     deploy:
       replicas: ${REPLICAS_GUILD:-2}
@@ -258,13 +355,18 @@ services:
       - "8091-8093:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.0.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
+      message-broker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      LOG_DIR: /var/log/tamagotchi
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
       CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
       CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
@@ -273,12 +375,151 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
-      USER_MANAGEMENT_SERVICE_URL: http://api-gateway:8080
-      TAMAGOTCHI_SERVICE_URL: http://api-gateway:8080
+      USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
+      TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
       PORT: 8080
     deploy:
       replicas: ${REPLICAS_PACKAGE_REGISTRY:-2}
 
+  log-init:
+    image: busybox:1.37.0
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "chown 1000:1000 /var/log/tamagotchi && chmod 1777 /var/log/tamagotchi"]
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
+
+  message-broker:
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.3.1}
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      service-discovery:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    environment:
+      JAVA_OPTS: ${BROKER_JAVA_OPTS:--Xms64m -Xmx256m -XX:ActiveProcessorCount=2}
+      PORT: 8070
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
+      # Lab 4 step 4: durable queues and the dead letter channel (broker 1.3.0+; older images ignore these).
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/message_broker
+      BROKER_RETRY_MAX_ATTEMPTS: ${BROKER_RETRY_MAX_ATTEMPTS:-5}
+      BROKER_RETRY_INITIAL_BACKOFF: ${BROKER_RETRY_INITIAL_BACKOFF:-1s}
+      BROKER_RETRY_MAX_BACKOFF: ${BROKER_RETRY_MAX_BACKOFF:-60s}
+      BROKER_REQUEST_TIMEOUT: ${BROKER_REQUEST_TIMEOUT:-10s}
+      BROKER_CONNECT_TIMEOUT: ${BROKER_CONNECT_TIMEOUT:-2s}
+      BROKER_MAX_CONCURRENT_REQUESTS: ${BROKER_MAX_CONCURRENT_REQUESTS:-200}
+      BROKER_QUEUE_CAPACITY: ${BROKER_QUEUE_CAPACITY:-100}
+      # Thread-per-request pools; 0 = BROKER_MAX_CONCURRENT_REQUESTS + 16.
+      BROKER_WORKER_THREADS: ${BROKER_WORKER_THREADS:-0}
+      BROKER_GRPC_THREADS: ${BROKER_GRPC_THREADS:-0}
+      BROKER_GRPC_PORT: 9070
+      DISCOVERY_REFRESH_INTERVAL: ${DISCOVERY_REFRESH_INTERVAL:-5s}
+      DISCOVERY_HEARTBEAT_INTERVAL: ${DISCOVERY_HEARTBEAT_INTERVAL:-10s}
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
+      CIRCUIT_BREAKER_WINDOW: ${CIRCUIT_BREAKER_WINDOW:-}
+      CIRCUIT_BREAKER_COOLDOWN: ${CIRCUIT_BREAKER_COOLDOWN:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
+      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
+      DISCORD_DEDUP_WINDOW: ${DISCORD_DEDUP_WINDOW:-60s}
+      DISCORD_QUEUE_CAPACITY: ${DISCORD_QUEUE_CAPACITY:-100}
+      LOG_DIR: /var/log/tamagotchi
+    ports:
+      - "127.0.0.1:8070:8070"
+      # gRPC (proto/broker.proto): services call Broker here; the broker calls their port 9000.
+      - "127.0.0.1:9070:9070"
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8070/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 150s
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    restart: unless-stopped
+    depends_on:
+      message-broker:
+        condition: service_healthy
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  loki:
+    image: grafana/loki:3.7.9
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+
+  loki-ready:
+    image: busybox:1.37.0
+    restart: "no"
+    depends_on:
+      loki:
+        condition: service_started
+    command: ["sh", "-c", "until wget -qO- http://loki:3100/ready > /dev/null; do sleep 1; done"]
+
+  alloy:
+    image: grafana/alloy:v1.21.3
+    restart: unless-stopped
+    user: "0:0"
+    depends_on:
+      loki-ready:
+        condition: service_completed_successfully
+      log-init:
+        condition: service_completed_successfully
+    command: ["run", "--storage.path=/var/lib/alloy", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - tamagotchi-logs:/var/log/tamagotchi:ro
+      - alloy-data:/var/lib/alloy
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki-ready:
+        condition: service_completed_successfully
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
 volumes:
   postgres-data:
+  tamagotchi-logs:
+  prometheus-data:
+  loki-data:
+  alloy-data:
+  grafana-data:

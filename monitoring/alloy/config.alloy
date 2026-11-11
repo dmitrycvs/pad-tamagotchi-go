@@ -1,0 +1,27 @@
+// Flat files (<service>.log, <service>-<instance>.log) and the Lab 4 per-service folders
+// (<service>/<instance_id>.log) in the shared tamagotchi-logs volume.
+local.file_match "tamagotchi" {
+  path_targets = [{"__path__" = "/var/log/tamagotchi/**/*.log", "job" = "tamagotchi"}]
+  sync_period = "5s"
+}
+
+discovery.relabel "log_labels" {
+  targets = local.file_match.tamagotchi.targets
+  rule {
+    source_labels = ["__path__"]
+    regex = ".*/tamagotchi/(message-broker|guild-service|package-registry-service|api-gateway|service-discovery|tamagotchi-service|notification-service|map-service|monster-raid-service|user-management-service|battle-service)(/[^/]+|-[^/]*)?\\.log"
+    target_label = "service"
+    replacement = "$1"
+  }
+}
+
+loki.source.file "tamagotchi" {
+  targets = discovery.relabel.log_labels.output
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

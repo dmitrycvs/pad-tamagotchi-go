@@ -18,6 +18,17 @@
       }
     },
     {
+      "name": "Prometheus metrics (Lab 4)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));", "const text = pm.response.text();", "[\"tamagotchi_http_requests_total\", \"tamagotchi_http_request_duration_seconds\", \"tamagotchi_in_flight\", \"tamagotchi_breaker_trips_total\"].forEach(name => pm.test(name, () => pm.expect(text).to.include(\"# TYPE \" + name)));", "pm.test(\"Labelled map-service\", () => pm.expect(text).to.include('service=\"map-service\"'));"] } }],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{service_base_url}}/metrics", "host": ["{{service_base_url}}"], "path": ["metrics"] },
+        "description": "Prometheus text with the shared tamagotchi_* metrics. No token. Prometheus scrapes every replica through the broker's targets adapter."
+      }
+    },
+    {
       "name": "Health Check",
       "event": [
         {
@@ -183,9 +194,9 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{base_url}}/api/map/users/{{user_id}}/location",
-          "host": ["{{base_url}}"],
-          "path": ["api", "map", "users", "{{user_id}}", "location"]
+          "raw": "{{broker_url}}/q/map-service/api/map/users/{{user_id}}/location",
+          "host": ["{{broker_url}}"],
+          "path": ["q", "map-service", "api", "map", "users", "{{user_id}}", "location"]
         },
         "description": "Requires service JWT. Used by other microservices to query a user's latest location."
       },
@@ -240,6 +251,7 @@
       "});"
     ] } }],
   "variable": [
+    { "key": "broker_url", "value": "http://localhost:8070" },
     { "key": "registry_url", "value": "http://localhost:8761", "type": "string", "description": "Service Discovery, for the health checks." },
     { "key": "jwt_secret", "value": "", "type": "string", "description": "Must equal JWT_SECRET in the stack .env; used to sign user tokens." },
     { "key": "service_jwt_secret", "value": "", "type": "string", "description": "Must equal SERVICE_JWT_SECRET in the stack .env; used to sign service tokens." },

@@ -12,9 +12,9 @@ Players raise Tamagotchis inside a package of their choosing, walk around the re
 
 The critical constraint of this system is that **packages are not uniform**. One package may model its pets with hunger, happiness and tiredness; another with energy, mood, discipline and creativity. The backend therefore separates *globally meaningful* state (identity, level, combat type, global currency, guild membership) from *package-local* state (health statistics, growth mechanics, local currency), and never forces the two to share a schema.
 
-The platform is split into **8 microservices**, each owning a distinct domain and its own database. No service reads another service's tables — all cross-service data flows through REST calls or asynchronous events.
+The platform is split into **8 microservices**, each owning a distinct domain and its own database. No service reads another service's tables — all cross-service data flows through the Message Broker, as gRPC requests or topic events.
 
-In front of them sits the **API Gateway**, the single entry point: every REST request, from a client or from another service, passes through it. The gateway authorizes the request and routes it to the owning service.
+The **API Gateway** authenticates external clients and relays their requests to the **Message Broker** (Lab 4). The broker queues every request and event durably, routes it to the least-loaded healthy instance over gRPC, reroutes it when an instance fails, and moves undeliverable messages to a dead letter channel. Prometheus, Loki and Grafana monitor the whole system.
 
 ---
 
@@ -40,7 +40,7 @@ Services are paired by coupling: each owner holds the two services that talk to 
 | **Tatarintev Denis** | Map, Monster Raid        | **C#** (ASP.NET Core + EF Core) | PostgreSQL + PostGIS | REST, SignalR for live raid state, idempotent operations                   | NetTopologySuite gives EF Core first-class geometry types over PostGIS, so proximity queries use real spatial indexes instead of hand-rolled distance math over every user. SignalR handles the raid clicker's live HP fan-out with reconnection and group management built in, which matters because raid damage arrives concurrently from many guild members — every write is idempotent via `event_id` so a reconnecting client can retry without double-counting.                                                                           |
 | **Obrijan Filip**    | User Management, Battle  | **C#** (ASP.NET Core + EF Core) | PostgreSQL           | REST with JWT issuance, SignalR for live battle state, atomic transactions | ASP.NET Core ships identity, password hashing and JWT bearer authentication as first-class components, so the platform's auth root needs very little hand-rolled security code — the part most expensive to get wrong. EF Core transactions over PostgreSQL keep the global-currency ledger ACID, which matters because battle rewards debit one user and credit another. SignalR carries live turn updates with reconnection and group management built in, so a dropped phone connection mid-battle recovers without custom plumbing.          |
 
-| **Cvasiuc Dmitrii** | API Gateway | **Java** (Spring Boot 4 + Spring Cloud Gateway, WebFlux) | — (stateless) | REST reverse proxy, JWT authorization, WebSocket negotiation, timeouts & concurrency limits | Spring Cloud Gateway runs on Netty's non-blocking event loop, so thousands of proxied requests in flight cost a handful of threads, and per-route timeouts and request cancellation are built in. Doing authorization once at the edge removes duplicate JWT handling from eight services written in two languages. The gateway holds no state, so it scales horizontally behind any load balancer. Java was the language banned for the services in Lab 1 and is required for the gateway in Lab 2. |
+| **Cvasiuc Dmitrii** | API Gateway | **Java** (Spring Boot 4 + Spring Cloud Gateway, WebFlux) | — (stateless) | REST reverse proxy, JWT authorization, WebSocket negotiation, timeouts & concurrency limits | Spring Cloud Gateway runs on Netty's non-blocking event loop, so thousands of proxied requests in flight cost a handful of threads, and per-route timeouts and request cancellation are built in. Doing authorization once at the edge removes duplicate JWT handling from eight services written in two languages. The gateway stores no persistent business state; its registry cache and direct-mode breakers are local to each process, so replicas can run behind a load balancer. Java was the language banned for the services in Lab 1 and is required for the gateway in Lab 2. |
 
 > **Note:** The team satisfies the two-language requirement with **Go** (Costov Maxim, Cvasiuc Dmitrii) and **C#** (Tatarintev Denis, Obrijan Filip). Both halves speak the same REST/JSON contract documented below, so the language split is invisible across service boundaries — the only cross-stack concern is keeping WebSocket frame shapes identical between Go's `gorilla/websocket` and .NET's SignalR, which the contract pins down explicitly.
 
@@ -48,26 +48,87 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 ## Architecture Diagram
 
-<a href="./src/application_diagram.png">
-  <img src="./src/application_diagram.png" alt="Architecture Diagram" width="100%">
-</a>
+```mermaid
+flowchart TB
+    Clients["Clients / Postman"]
 
-[Open full-size diagram](./src/application_diagram.png) · source: [`application_diagram.svg`](./src/application_diagram.svg)
+    Gateway["API Gateway :8080<br/>JWT, internal routes 404,<br/>admin log download"]
 
-Clients and services send every REST call to the **API Gateway**, which checks
-the JWT and forwards the request round-robin to one registered instance of the
-owning service. Each business service runs as several replicas; every replica
-registers with **Service Discovery**, sends heartbeats and exposes `/health`,
-which Service Discovery polls. The gateway reads the instance list every 5 s,
-trips a circuit breaker on an instance that keeps failing and removes it from
-the registry; health alerts, trips and removals are posted to **Discord**.
-WebSockets connect directly to the instance chosen during gateway negotiation.
-The dependencies between services are listed below.
+    subgraph BrokerBox["Message Broker :8070 HTTP / :9070 gRPC"]
+        Queues["Request queues /q/{service}<br/>subscriber-based"]
+        Topics["Topic queues<br/>/api/topics/{topic}/events"]
+        Routing["Least-load balancer<br/>circuit breaker + reroute"]
+        DLC["Dead letter channel<br/>/api/dead-letters"]
+    end
+
+    BrokerDB[("PostgreSQL message_broker<br/>durable messages")]
+
+    Services["Eight business services, two replicas each<br/>User Management, Battle, Tamagotchi, Notification,<br/>Map, Monster Raid, Guild, Package Registry<br/>gRPC Consumer :9000"]
+
+    Discord["Discord alerts"]
+    Discovery["Service Discovery :8761<br/>instances, topics, grpc_port, load"]
+    ServiceDBs[("Separate PostgreSQL databases")]
+    Redis[("Redis<br/>guild events")]
+
+    subgraph Monitoring
+        Prometheus["Prometheus :9090"]
+        Logs["Shared volume<br/>/var/log/tamagotchi"]
+        Alloy --> Loki
+        Grafana["Grafana :3000"]
+    end
+
+    Clients -->|"REST + JWT"| Gateway
+    Gateway -->|"HTTP, trusted identity"| Queues
+    Clients <-.->|"WebSocket / SignalR after negotiation"| Services
+    Queues --> Routing
+    Topics --> Routing
+    Routing -->|"gRPC Consumer.Handle / Deliver :9000<br/>HTTP fallback"| Services
+    Services -->|"gRPC Broker.Call / Broker.Publish"| BrokerBox
+    BrokerBox --> BrokerDB
+    Routing -->|"after 5 failed attempts"| DLC
+    Services -.->|"register + heartbeat"| Discovery
+    Discovery -.->|"health and load polls"| Services
+    BrokerBox -.->|"instance cache, 5 s"| Discovery
+    Gateway -.->|"realtime instance cache"| Discovery
+    Services --> ServiceDBs
+    Services <-->|"Guild chat"| Redis
+    Prometheus -.->|"HTTP SD via broker"| BrokerBox
+    Prometheus -->|"scrape /metrics"| Services
+    Gateway & BrokerBox & Services -->|"JSON logs"| Logs
+    Logs --> Alloy
+    Logs -->|"zip download"| Gateway
+    BrokerBox & Discovery -.-> Discord
+    Grafana --> Prometheus
+    Grafana --> Loki
+```
+
+**How a request travels (Lab 4).** A client calls the API Gateway with a JWT. The gateway checks it,
+refuses internal service-to-service routes with 404, and relays the request to the Message Broker's
+queue for the target service (`/q/{service}`). The broker stores the message in its PostgreSQL
+database, picks the least-loaded healthy instance and sends it over gRPC (`Consumer.Handle` on port
+9000), or HTTP for an instance that registered no `grpc_port`. If that instance fails or its breaker
+is open, the broker reroutes the message to another instance in the same request.
+
+**How services talk to each other.** A service that needs an answer calls `Broker.Call` on
+`message-broker:9070`. A service that only announces something fires an event with `Broker.Publish`
+to a topic such as `battle.request_received` and does not know who listens. Every service whose
+Service Discovery registration lists that topic gets one copy (`Consumer.Deliver`). Copies that
+cannot be delivered are retried with backoff and, after 5 attempts or a permanent rejection, go to
+the dead letter channel, where they can be listed and retried.
+
+**What stays direct.** Registration, heartbeats and health/load polls go straight to Service
+Discovery. Realtime sockets (guild chat, live battles and raids) are negotiated through the gateway
+and then connect straight to the replica that owns them; guild chat crosses replicas through Redis.
+
+**Monitoring.** Prometheus finds every instance through the broker's HTTP service-discovery adapter
+and scrapes its `/metrics`. Every service writes JSON log lines to the shared `/var/log/tamagotchi`
+volume; Alloy ships them to Loki, and admins download them as a zip through the gateway. Grafana
+shows both. The broker and Service Discovery send Discord alerts.
 
 **How the services communicate:**
 
-- **API Gateway** is the single entry point: clients and services alike send REST calls to it, and it validates the JWT and forwards the request to the owning service with trusted identity headers in place of the token. For live connections it only negotiates: the client gets back a URL to the service's WebSocket and connects directly.
-- **Notification Service** is the delivery boundary — every service except Package Registry publishes events to it, and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
+- **API Gateway** accepts external client REST, validates JWTs and relays trusted identity to the broker. It negotiates direct realtime sockets and serves the admin log download. **Message Broker** owns request queues, topic queues, durable delivery, the dead letter channel, least-load instance selection and the Lab 3 circuit breaker.
+- **Notification Service** is the delivery boundary. It subscribes to the six notification topics (`user.friend_request_received`, `battle.request_received`, `tamagotchi.captured`, `map.nearby_player_detected`, `raid.started`, `guild.invitation_sent`), and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
 - **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle credits global currency and XP through it, and Package Registry grants moderator/admin roles through it.
 - **Package Registry Service** is the configuration authority — Battle and Monster Raid read stat-interpretation rules from it before computing damage, and it supplies the stat definitions used when a new Tamagotchi is created.
 - **Monster Raid Service** asks Guild Service *"is this player a member of the guild this raid is bound to?"* before admitting anyone to the boss clicker, and exchanges monster definitions with Package Registry in both directions.
@@ -158,7 +219,7 @@ Owns the **edge of the system**: routing every REST request to the service that 
 
 ## Authentication
 
-All requests enter through the **API Gateway** (`http://localhost:8080`). Endpoints marked **Headers: `Authorization: Bearer <jwt>`** require a valid user JWT issued by the **User Management Service**. The token carries:
+External business requests enter through the **API Gateway** (`http://localhost:8080`). Service-to-service requests use the **Message Broker** (`http://message-broker:8070/q/{target-service}`), which validates service JWTs and emits the same trusted headers. Endpoints marked **Headers: `Authorization: Bearer <jwt>`** require a valid user JWT issued by the **User Management Service**. The token carries:
 
 - `sub` — the user UUID
 - `package_id` — the package the session belongs to
@@ -735,6 +796,32 @@ Success (201 Created):
 Headers: `Authorization: Bearer <jwt>`
 
 Success (204 No Content)
+
+#### Receive a Topic Event
+
+`POST /api/events` — called by the **Message Broker** for the topics this service subscribes to (Lab 4). Not exposed by the API Gateway. Idempotent via `event_id`.
+
+```json
+{
+  "event_id": "evt-uuid-capture-001",
+  "topic": "tamagotchi.captured",
+  "type": "tamagotchi_captured",
+  "occurred_at": "2026-11-10T12:00:00Z",
+  "publisher": "tamagotchi-service",
+  "payload": { "recipient_id": "user-uuid-456", "tamagotchi_id": "tama-uuid-001", "new_owner_id": "user-uuid-123" }
+}
+```
+
+`payload.recipient_id` is required; `payload.title` and `payload.body` are optional (defaults per topic). Answers **202** like Publish an Event; **400** for a missing `event_id`, `topic` or recipient; **422** for a topic the service does not subscribe to.
+
+| Topic | Notification type |
+|---|---|
+| `user.friend_request_received` | `friend_request_received` |
+| `map.nearby_player_detected` | `nearby_player_detected` |
+| `battle.request_received` | `battle_request_received` |
+| `tamagotchi.captured` | `tamagotchi_captured` |
+| `guild.invitation_sent` | `guild_invitation` |
+| `raid.started` | `raid_started` |
 
 #### Publish an Event
 
@@ -1478,8 +1565,8 @@ Any endpoint can additionally return the errors below. Each carries the header `
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **6 GB** of free RAM — nineteen containers by default: the gateway, Service Discovery, two replicas of each of the eight services and PostgreSQL
-- Ports **5432**, **8080**, **8082–8093** and **8761** free on the host
+- Roughly **8 GB** of free RAM for the complete application and monitoring stack (25 long-running containers plus two initialization/readiness jobs)
+- Ports **3000**, **5432**, **8070**, **8080**, **8082–8093**, **8761**, **9070** and **9090** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1511,16 +1598,17 @@ matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
-| **API Gateway** | `dmitrycvs/api-gateway:3.0.0`               | **8080** |
-| User Management       | `filipel2004/user-management-service:3.0.0` | —              |
-| Battle                | `filipel2004/battle-service:3.0.0`          | 8082–8084      |
-| Tamagotchi            | `dmitrycvs/tamagotchi-service:2.2.0`        | —              |
-| Notification          | `dmitrycvs/notification-service:2.2.0`      | —              |
-| Map                   | `takima/pad-map-service:2.2.0`              | 8085–8087      |
-| Monster Raid          | `takima/pad-monster-raid-service:2.2.0`     | 8088–8090      |
-| Guild                 | `maxkostov/guild-service:3.0.0`             | 8091–8093      |
-| Package Registry      | `maxkostov/package-registry-service:3.0.0`  | —              |
-| **Service Discovery** | `maxkostov/service-discovery:3.3.0`         | **8761** |
+| **API Gateway** | `dmitrycvs/api-gateway:3.3.0`               | **8080** |
+| User Management       | `filipel2004/user-management-service:4.0.0` | —              |
+| Battle                | `filipel2004/battle-service:4.0.0`          | 8082–8084      |
+| Tamagotchi            | `dmitrycvs/tamagotchi-service:4.1.0`        | —              |
+| Notification          | `dmitrycvs/notification-service:4.1.0`      | —              |
+| Map                   | `takima/pad-map-service:2.3.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.3.0`     | 8088–8090      |
+| Guild                 | `maxkostov/guild-service:3.2.0`             | 8091–8093      |
+| Package Registry      | `maxkostov/package-registry-service:3.2.0`  | —              |
+| **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
+| **Message Broker**    | `maxkostov/message-broker:1.3.1`            | **8070**, 9070 |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -1617,6 +1705,10 @@ Each service also logs every request with its `request_id`, so
 between the two container prefixes.
 
 ### Circuit breaker
+
+Lab 4 moves business HTTP instance selection and this unchanged state machine
+from Gateway to [Message Broker](./message-broker/README.md). Gateway's direct
+mode below remains available when MESSAGE_BROKER_URL is empty.
 
 **Every component that calls another service follows this rule** (Lab 3): the
 gateway for each upstream, and each service for each peer it calls. One
@@ -1778,7 +1870,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, `message-broker`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix        | Purpose                                | Example                                     |
@@ -1940,3 +2032,177 @@ Validate registration and health in the running main stack through
 `http://localhost:8761/api/registry/services`. Check Guild chat with
 `scripts/realtime-smoke.mjs` as described above. All services run from published
 images; these checks do not build or launch a separate stack.
+
+
+## Lab 4: Breaking and Brokering
+
+The Message Broker sits between the gateway and the services, and between the
+services themselves. Its full contract is
+[message-broker/README.md](./message-broker/README.md#shared-contract): request
+and topic queues, gRPC, durable delivery, the dead letter channel, failover,
+load-based routing and its metrics. Java 21 + Spring MVC/Tomcat serves HTTP on
+8070 and gRPC on 9070.
+
+| Grade | Requirement | Where |
+| --- | --- | --- |
+| 2 | Message Broker in a new language (Java), own repo and workflow | [MaxKostov/message-broker](https://github.com/MaxKostov/message-broker), released to DockerHub on every `main` merge |
+| 3 | README, architecture diagram, Postman collections | [Architecture Diagram](#architecture-diagram), [postman/README.md](./postman/README.md#lab-4-final-check) |
+| 4 | Log download endpoint | `GET /api/admin/logs` on the gateway, [step 3](#step-3-logs-thread-per-request-topic-list-and-grpc-lab-4) |
+| 5 | Broker dockerized and published; service-to-service traffic and load balancing / circuit breakers moved to the broker | `maxkostov/message-broker`, peer URLs `http://message-broker:8070/q/{service}` (below) |
+| 6 | Subscriber-based queues (gateway to service) and topic-based queues (service to service); topics in the Service Discovery registration | [Topics](#topics-lab-4-step-2) |
+| 7 | Thread-per-request; topic list endpoint | [step 3](#step-3-logs-thread-per-request-topic-list-and-grpc-lab-4) |
+| 8 | gRPC between services and broker; internal routes removed from the gateway | [step 3](#step-3-logs-thread-per-request-topic-list-and-grpc-lab-4), [Topics](#topics-lab-4-step-2) |
+| 9 | Durable queues; dead letter channel and its endpoint | [step 4](#step-4-durable-queues-dead-letters-failover-and-load-based-routing-lab-4) |
+| 10 | High availability (reroute after a breaker trips); load-based routing; Grafana + Prometheus + Loki | [step 4](#step-4-durable-queues-dead-letters-failover-and-load-based-routing-lab-4), [monitoring/README.md](./monitoring/README.md) |
+
+**Check it all at once:** start the stack, then run
+[postman/lab4-final.postman_collection.json](./postman/lab4-final.postman_collection.json)
+(23 requests, 60 assertions, one folder per grade).
+
+All 18 configured peer base URLs now use
+`http://message-broker:8070/q/{target-compose-service-name}`. Appended `/api/...`
+paths, method, query, raw body and upstream responses stay unchanged. Existing
+service JWTs are validated by the broker, which replaces untrusted identity
+headers with the shared gateway trust contract. Public peer reads such as
+Tamagotchi types retain their anonymous access. `API_GATEWAY_URL` remains the
+Guild realtime identity endpoint; registration stays on Service Discovery.
+
+Gateway's `MESSAGE_BROKER_URL` sends external business HTTP through the same
+broker delivery path and skips its old HTTP instance/breaker filters. It keeps
+JWT checks and realtime instance ownership. Its outer deadline is 12 seconds,
+above the broker's 10-second delivery deadline and services' 8-second deadline.
+A broker failure returns `{ "error": "..." }` with `X-Broker-Error: true`;
+503 also supplies `Retry-After: 1`. Upstream errors remain unchanged.
+
+Monitoring configuration and the shared metric names live in
+[monitoring/README.md](./monitoring/README.md). Set `GRAFANA_ADMIN_PASSWORD` in
+`.env`, then `docker compose up -d --wait`. Java heaps default to 256 MiB per
+process, with two available processors reported per JVM and a 150-second startup health
+grace for emulation; `*_JAVA_OPTS` settings in .env.example are configurable. Open Grafana at
+`http://localhost:3000` and Prometheus targets at `http://localhost:9090/targets`.
+The broker's HTTP SD adapter exposes every registry instance to Prometheus, and
+every instance serves `GET /metrics` (19/19, see
+[monitoring/metrics-readiness.md](./monitoring/metrics-readiness.md)). Alloy tails
+the shared log folder and forwards it to Loki. `GET /health` and `GET /metrics`
+remain available under delivery saturation.
+
+The Lab 3 regression through the broker, plus health/error and every configured
+peer-transport check, is
+[postman/lab3-broker.postman_collection.json](./postman/lab3-broker.postman_collection.json).
+Set `service_jwt_secret` only in a local Postman environment. Its 18 edge checks
+verify broker transport and response ownership; they do not by themselves prove
+every calling service's HTTP client implementation.
+
+Released images: Message Broker **1.3.1**, API Gateway **3.3.0**, Service Discovery
+**3.6.0**, Tamagotchi and Notification **4.1.0**, User Management and Battle **4.0.0**,
+Map and Monster Raid **2.3.0**, Guild and Package Registry **3.2.0**. Each submodule
+points at the released commit on `main`.
+
+### Topics (Lab 4, step 2)
+
+Service-to-service **events** use topics: a service fires an event with
+`POST http://message-broker:8070/api/topics/{topic}/events` and does not know who
+listens. Services subscribe by listing topics in the `topics` field of their
+Service Discovery registration; the broker delivers one copy per subscribing
+service to `POST /api/events`, through the same load balancer and breaker as
+request queues. Names are `domain.event`. Full contract:
+[broker README, "Topics"](./message-broker/README.md#topics).
+
+| Topic | Publisher | Subscribers |
+| --- | --- | --- |
+| `tamagotchi.captured` | Tamagotchi 4.1.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `map.nearby_player_detected` | Map 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `raid.started` | Monster Raid 2.3.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `user.friend_request_received` | User Management 4.0.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `battle.request_received` | Battle 4.0.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+| `guild.invitation_sent` | Guild 3.2.0 (`BROKER_GRPC_URL` set, gRPC `Broker.Publish`) | Notification |
+
+Request queues stay for calls that need an answer from a known service. Internal
+service-to-service routes are no longer exposed by the gateway (404); services
+reach them through the broker.
+
+Every service writes its logs to the shared `/var/log/tamagotchi` folder
+(`LOG_DIR`) and serves `GET /metrics`.
+
+Progress and the end-to-end results of each step:
+[tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).
+
+### Step 3: logs, thread-per-request, topic list and gRPC (Lab 4)
+
+**Log download (Grade 4).** Services write JSON log lines to the shared `tamagotchi-logs` volume
+at `/var/log/tamagotchi/<service>/<instance_id>.log`; Map and Monster Raid 2.3.0 do so. Older
+flat files (`<service>.log`, `<service>-<instance_id>.log`) stay valid. Admins download the
+matching files as one zip:
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_JWT" -o logs.zip \
+  "http://localhost:8080/api/admin/logs?service=map-service&instance=&since=1h"
+```
+
+`service` and `instance` are exact names; `since` is an ISO-8601 instant or `30s`/`15m`/`2h`/`1d`.
+The endpoint answers 400 for bad filters, 401 without a token, 403 without the admin role and 404
+when nothing matches ([gateway README](./api-gateway/README.md#downloading-logs-lab-4)). Alloy now
+tails the per-service folders too (`/var/log/tamagotchi/**/*.log`). Map and Monster Raid also
+serve `GET /metrics` with the shared `tamagotchi_*` names.
+
+**Thread-per-request (Grade 7).** The broker runs each HTTP request on one thread of a bounded
+pool (`broker-http-N`), and each gRPC call on a second one (`broker-grpc-N`). Sizes come from
+`BROKER_WORKER_THREADS` / `BROKER_GRPC_THREADS`; the default is the delivery limit + 16, and both
+pools are logged at startup. The shared state in the request path and its locks are listed in the
+[broker README, "Concurrency model"](./message-broker/README.md#concurrency-model).
+
+**Topic list (Grade 7).** `GET http://localhost:8070/api/topics` (service JWT) lists every known
+topic with its subscribers and message counts
+([broker README](./message-broker/README.md#topics), Postman `25 List topics`).
+
+**gRPC (Grade 8).** Contract: [`message-broker/proto/broker.proto`](./message-broker/proto/broker.proto),
+documented in the [broker README, "gRPC"](./message-broker/README.md#grpc) with Go and C#
+examples.
+
+- Services call `Broker.Call` / `Broker.Publish` on `message-broker:9070`.
+- The broker calls `Consumer.Handle` / `Consumer.Deliver` on port 9000 of every instance that
+  registered `grpc_port` (Service Discovery 3.6.0), and falls back to HTTP for the others.
+- The balancer, circuit breaker, identity headers and error shapes are the same on both transports.
+- All eight business services use gRPC in both directions (`BROKER_GRPC_URL`, `GRPC_PORT: 9000`).
+  The gateway still calls the broker over HTTP.
+
+### Step 4: durable queues, dead letters, failover and load-based routing (Lab 4)
+
+Message Broker **1.3.1** ([broker README](./message-broker/README.md), sections Durable queues,
+Dead letter channel, High availability, Load-based routing).
+
+**Durable queues (Grade 9).** Every message is a row in the `message_broker` database on the stack's
+PostgreSQL (`DATABASE_URL` in Compose; the broker creates the database on volumes that predate it).
+A request is stored before it is sent, and a published event gets its 202 only after every
+subscriber's copy is stored. Event copies, and requests that carry an `event_id`, are redelivered
+with backoff (1, 2, 4, 8 s) until delivered, also after a broker restart: a message the broker was
+delivering when it stopped is picked up again when its lease (60 s) runs out. Delivery is at least
+once; every consumer drops duplicates by `event_id` (checked against Notification 4.0.0
+`/api/events` and `/api/notifications/publish`, Tamagotchi 4.0.0 `/xp` and User Management
+`/currency`: a repeated `event_id` is applied once).
+
+**Dead letter channel (Grade 9).** After 5 failed attempts, or when a subscriber rejects an event
+with a 4xx that cannot succeed later, the message goes to the dead letter channel, logged at ERROR
+(`Message dead-lettered ...`):
+
+```sh
+curl -H "Authorization: Bearer $SERVICE_JWT" "http://localhost:8070/api/dead-letters?queue=notification-service&since=2026-11-11T00:00:00Z"
+curl -X POST -H "Authorization: Bearer $SERVICE_JWT" http://localhost:8070/api/dead-letters/<id>/retry
+```
+
+**High availability (Grade 10).** When a send to an instance fails (connection error, timeout, 5xx)
+or its breaker is open, the broker sends the same message to another instance in the same request,
+never the same one twice, and logs `Rerouting queue=... from=<instance> to=<instance> reason="..."`.
+Only messages safe to repeat are rerouted: idempotent methods (GET, HEAD, OPTIONS, PUT, DELETE) and
+messages with an `event_id`.
+
+**Load-based routing (Grade 10).** Instead of round-robin, each message goes to the instance with
+the lowest `(in_flight from Service Discovery's health check + the broker's own calls in flight) /
+max_concurrent`; ties take turns. Every send logs `load=0.050 in_flight=4+1 max_concurrent=100`.
+
+**Metrics.** `broker_queue_depth{queue}`, `broker_reroutes_total{queue}` and
+`broker_dead_letters_total{queue}` fill the dashboard panels that were waiting for them, plus
+`broker_dead_letter_channel_size`, `broker_redeliveries_total` and `broker_chosen_instance_load`.
+
+User Management and Battle 4.0.0 serve `GET /metrics`, write `/var/log/tamagotchi/<service>/<instance_id>.log`,
+fire their notification topics and speak gRPC with the broker (`BROKER_GRPC_URL`, `GRPC_PORT: 9000`).

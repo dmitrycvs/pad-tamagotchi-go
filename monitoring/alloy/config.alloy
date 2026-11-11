@@ -9,7 +9,7 @@ discovery.relabel "log_labels" {
   targets = local.file_match.tamagotchi.targets
   rule {
     source_labels = ["__path__"]
-    regex = ".*/tamagotchi/(message-broker|guild-service|package-registry-service|api-gateway|service-discovery|tamagotchi-service|notification-service|map-service|monster-raid-service|user-management-service|battle-service)(/[^/]+|-[^/]*)?\.log"
+    regex = ".*/tamagotchi/(message-broker|guild-service|package-registry-service|api-gateway|service-discovery|tamagotchi-service|notification-service|map-service|monster-raid-service|user-management-service|battle-service)(/[^/]+|-[^/]*)?\\.log"
     target_label = "service"
     replacement = "$1"
   }

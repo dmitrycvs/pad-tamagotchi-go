@@ -175,7 +175,7 @@ services:
       - "8082-8084:8080"
 
   tamagotchi-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-4.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -211,7 +211,7 @@ services:
       replicas: ${REPLICAS_TAMAGOTCHI:-2}
 
   notification-service:
-    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-4.0.0}
+    image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -319,7 +319,7 @@ services:
       - "8088-8090:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.1.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -345,6 +345,8 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
       NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
       PORT: 8080
     deploy:
       replicas: ${REPLICAS_GUILD:-2}
@@ -353,7 +355,7 @@ services:
       - "8091-8093:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.1.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.2.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -376,6 +378,8 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
       TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      GRPC_PORT: 9000
+      BROKER_GRPC_URL: http://message-broker:9070
       PORT: 8080
     deploy:
       replicas: ${REPLICAS_PACKAGE_REGISTRY:-2}

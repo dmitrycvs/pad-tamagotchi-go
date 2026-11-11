@@ -1991,12 +1991,30 @@ Validate registration and health in the running main stack through
 images; these checks do not build or launch a separate stack.
 
 
-## Lab 4: broker and monitoring foundation
+## Lab 4: Breaking and Brokering
 
-The broker contract is [message-broker/README.md](./message-broker/README.md#shared-contract).
-It defines request/reply shapes, queues, errors and the reserved Topics
-(Dmitrii) / gRPC (Denis) sections. Java 21 + Spring MVC/Tomcat serves HTTP on
-8070 and gRPC on 9070 (step 3, see below).
+The Message Broker sits between the gateway and the services, and between the
+services themselves. Its full contract is
+[message-broker/README.md](./message-broker/README.md#shared-contract): request
+and topic queues, gRPC, durable delivery, the dead letter channel, failover,
+load-based routing and its metrics. Java 21 + Spring MVC/Tomcat serves HTTP on
+8070 and gRPC on 9070.
+
+| Grade | Requirement | Where |
+| --- | --- | --- |
+| 2 | Message Broker in a new language (Java), own repo and workflow | [MaxKostov/message-broker](https://github.com/MaxKostov/message-broker), released to DockerHub on every `main` merge |
+| 3 | README, architecture diagram, Postman collections | [Architecture Diagram](#architecture-diagram), [postman/README.md](./postman/README.md#lab-4-final-check) |
+| 4 | Log download endpoint | `GET /api/admin/logs` on the gateway, [step 3](#step-3-logs-thread-per-request-topic-list-and-grpc-lab-4) |
+| 5 | Broker dockerized and published; service-to-service traffic and load balancing / circuit breakers moved to the broker | `maxkostov/message-broker`, peer URLs `http://message-broker:8070/q/{service}` (below) |
+| 6 | Subscriber-based queues (gateway to service) and topic-based queues (service to service); topics in the Service Discovery registration | [Topics](#topics-lab-4-step-2) |
+| 7 | Thread-per-request; topic list endpoint | [step 3](#step-3-logs-thread-per-request-topic-list-and-grpc-lab-4) |
+| 8 | gRPC between services and broker; internal routes removed from the gateway | [step 3](#step-3-logs-thread-per-request-topic-list-and-grpc-lab-4), [Topics](#topics-lab-4-step-2) |
+| 9 | Durable queues; dead letter channel and its endpoint | [step 4](#step-4-durable-queues-dead-letters-failover-and-load-based-routing-lab-4) |
+| 10 | High availability (reroute after a breaker trips); load-based routing; Grafana + Prometheus + Loki | [step 4](#step-4-durable-queues-dead-letters-failover-and-load-based-routing-lab-4), [monitoring/README.md](./monitoring/README.md) |
+
+**Check it all at once:** start the stack, then run
+[postman/lab4-final.postman_collection.json](./postman/lab4-final.postman_collection.json)
+(23 requests, 60 assertions, one folder per grade).
 
 All 18 configured peer base URLs now use
 `http://message-broker:8070/q/{target-compose-service-name}`. Appended `/api/...`
@@ -2013,19 +2031,20 @@ above the broker's 10-second delivery deadline and services' 8-second deadline.
 A broker failure returns `{ "error": "..." }` with `X-Broker-Error: true`;
 503 also supplies `Retry-After: 1`. Upstream errors remain unchanged.
 
-Monitoring configuration and the metric names reserved for later steps live in
+Monitoring configuration and the shared metric names live in
 [monitoring/README.md](./monitoring/README.md). Set `GRAFANA_ADMIN_PASSWORD` in
 `.env`, then `docker compose up -d --wait`. Java heaps default to 256 MiB per
 process, with two available processors reported per JVM and a 150-second startup health
 grace for emulation; `*_JAVA_OPTS` settings in .env.example are configurable. Open Grafana at
 `http://localhost:3000` and Prometheus targets at `http://localhost:9090/targets`.
-The broker's HTTP SD adapter exposes every registry instance to Prometheus;
-missing `/metrics` endpoints are visible as down targets. Alloy tails the
-shared log folder and forwards it to Loki. `GET /health` and `GET /metrics`
+The broker's HTTP SD adapter exposes every registry instance to Prometheus, and
+every instance serves `GET /metrics` (19/19, see
+[monitoring/metrics-readiness.md](./monitoring/metrics-readiness.md)). Alloy tails
+the shared log folder and forwards it to Loki. `GET /health` and `GET /metrics`
 remain available under delivery saturation.
 
-Run the existing Lab 3 regression through the broker, plus health/error and
-all configured peer-transport checks, with
+The Lab 3 regression through the broker, plus health/error and every configured
+peer-transport check, is
 [postman/lab3-broker.postman_collection.json](./postman/lab3-broker.postman_collection.json).
 Set `service_jwt_secret` only in a local Postman environment. Its 18 edge checks
 verify broker transport and response ownership; they do not by themselves prove
@@ -2059,8 +2078,8 @@ Request queues stay for calls that need an answer from a known service. Internal
 service-to-service routes are no longer exposed by the gateway (404); services
 reach them through the broker.
 
-Tamagotchi and Notification also write their logs to the shared
-`/var/log/tamagotchi` folder (`LOG_DIR`) and serve `GET /metrics`.
+Every service writes its logs to the shared `/var/log/tamagotchi` folder
+(`LOG_DIR`) and serves `GET /metrics`.
 
 Progress and the end-to-end results of each step:
 [tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).
@@ -2101,16 +2120,8 @@ examples.
 - The broker calls `Consumer.Handle` / `Consumer.Deliver` on port 9000 of every instance that
   registered `grpc_port` (Service Discovery 3.6.0), and falls back to HTTP for the others.
 - The balancer, circuit breaker, identity headers and error shapes are the same on both transports.
-- Map, Monster Raid, User Management and Battle have moved, both directions. The gateway still calls
-  the broker over HTTP.
-
-| Image | Version |
-| --- | --- |
-| Message Broker | 1.2.0 |
-| API Gateway | 3.3.0 |
-| Service Discovery | 3.6.0 |
-| Map / Monster Raid | 2.3.0 |
-| User Management / Battle | 4.0.0 |
+- All eight business services use gRPC in both directions (`BROKER_GRPC_URL`, `GRPC_PORT: 9000`).
+  The gateway still calls the broker over HTTP.
 
 ### Step 4: durable queues, dead letters, failover and load-based routing (Lab 4)
 

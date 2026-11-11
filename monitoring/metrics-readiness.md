@@ -1,37 +1,39 @@
-# Metrics readiness — 2026-11-09
+# Metrics readiness — 2026-11-11
 
-Actual check against the running `tamagotchi-go` Compose network, after local
-published-image integration. `scripts/check-metrics.py` checks every registered
-instance plus Service Discovery itself. **7/19 targets pass; 12 return 404.**
-Prometheus additionally scrapes itself, so its targets view has 20 targets.
+Check against the running `tamagotchi-go` Compose network with every Lab 4
+release image (Message Broker 1.3.1, API Gateway 3.3.0, Service Discovery 3.6.0,
+Tamagotchi and Notification 4.1.0, User Management and Battle 4.0.0, Map and
+Monster Raid 2.3.0, Guild and Package Registry 3.2.0).
+`scripts/check-metrics.py` checks every registered instance plus Service
+Discovery itself. **19/19 targets pass.** Prometheus also scrapes itself, so
+its targets view shows 20 targets, all up.
 
-| Service | Instances checked | GET /metrics | Owner / next action |
-| --- | --- | --- | --- |
-| message-broker | 1 | 200, valid Prometheus | Max; PRs 1/2 merged, 1.0.0 published |
-| api-gateway | 1 | 200, valid Prometheus | Max / Dmitrii; release PR 16 merged, 3.1.0 published |
-| service-discovery | 1 | 200, valid Prometheus | Max; release PR 10 merged, 3.4.0 published |
-| guild-service | 2 | Both 200, valid Prometheus | Max; release PR 8 merged, 3.1.0 published |
-| package-registry-service | 2 | Both 200, valid Prometheus | Max; release PR 7 merged, 3.1.0 published |
-| tamagotchi-service | 2 | Both 404 | Dmitrii; checked image 2.2.0 |
-| notification-service | 2 | Both 404 | Dmitrii; checked image 2.2.0 |
-| map-service | 2 | Both 404 | Denis; checked image 2.2.0 |
-| monster-raid-service | 2 | Both 404 | Denis; checked image 2.2.0 |
-| user-management-service | 2 | Both 404 | Filip; checked image 3.0.0 |
-| battle-service | 2 | Both 404 | Filip; checked image 3.0.0 |
+| Service | Instances checked | GET /metrics |
+| --- | --- | --- |
+| message-broker | 1 | 200, valid Prometheus |
+| api-gateway | 1 | 200, valid Prometheus |
+| service-discovery | 1 | 200, valid Prometheus |
+| guild-service | 2 | Both 200, valid Prometheus |
+| package-registry-service | 2 | Both 200, valid Prometheus |
+| tamagotchi-service | 2 | Both 200, valid Prometheus |
+| notification-service | 2 | Both 200, valid Prometheus |
+| map-service | 2 | Both 200, valid Prometheus |
+| monster-raid-service | 2 | Both 200, valid Prometheus |
+| user-management-service | 2 | Both 200, valid Prometheus |
+| battle-service | 2 | Both 200, valid Prometheus |
 
-Owner follow-up with shared metric/log contracts and source-access requests:
-[issue 55 comment](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55#issuecomment-6743394529).
-All six teammate source repositories return “Repository not found” for the
-authenticated MaxKostov account, with no pending repository invitations.
+Every business service exports the shared `tamagotchi_in_flight` gauge from
+startup. `tamagotchi_http_requests_total` and the duration histogram appear
+after a service's first business request, since health checks and scrapes are
+not counted.
 
-Grafana's provisioned `tamagotchi-lab4` dashboard has 12 panels. Its actual
-Prometheus datasource proxy returns request counters/rates for Broker, Gateway,
-Discovery, Guild and Package Registry. Its Loki proxy returns log counts for
-the same five service names. Shared per-instance files and Alloy tailing were
-verified. Later-step queue-depth/reroute/dead-letter panels correctly have no
-data until implemented; missing owner metrics remain visible as down targets.
+Logs: Loki's `service` label lists all 11 services (8 business services, gateway,
+broker, Service Discovery), shipped by Alloy from the shared
+`/var/log/tamagotchi` volume. Grafana's provisioned `tamagotchi-lab4` dashboard
+has 12 panels: requests, 5xx errors and p95 latency per service, in-flight
+requests, breaker trips, targets up, broker message rate and in-flight
+delivery, queue depth, reroutes, dead letters, and the shared service logs.
 
 Container startup readiness and metrics readiness are different checks:
-`docker compose ... up -d --wait` passes, while `check-metrics.py` intentionally
-exits nonzero until owners publish the missing endpoints. All five owned/infrastructure targets now run the published versions recorded
-in `../docs/lab4-releases.json`.
+`docker compose up -d --wait` waits for health, and `check-metrics.py` exits
+nonzero if any registered instance is missing or serves malformed metrics.

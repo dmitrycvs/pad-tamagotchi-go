@@ -86,8 +86,6 @@ running Compose network; it exits nonzero for missing/malformed metrics. See
 `metrics-readiness.md` for the last actual check and owner follow-up. Startup
 readiness of the containers is separate from instrumentation readiness.
 
-All five owned/infrastructure service releases are published. The main Compose
-file uses their verified versioned image tags; no local source-image override
-is required. Released Git commits and immutable image digests are recorded in
-`../docs/lab4-releases.json`. `../docs/lab4-handoff.md` tracks the integration
-merge, broker ancestry repair, and outstanding owner instrumentation.
+Every service release is published. The main Compose file pins their versioned
+image tags, and each submodule points at the released commit; no local
+source-image override is required.

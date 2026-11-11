@@ -86,5 +86,5 @@ commit populated environments or collections.
 
 The transport folder verifies broker selection and target replies; it does not
 execute every source service's HTTP client. Full battle/raid/proximity and
-Firebase delivery remain separate integration scenarios. See the Lab 4 handoff
+Firebase delivery remain separate integration scenarios. See [issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55)
 for actual results and owner blockers.

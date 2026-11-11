@@ -75,6 +75,34 @@ an endpoint that uses it 3 times, and
 `docker compose logs | grep "Circuit breaker opened"`.
 
 
+## Lab 4: final check
+
+Import [lab4-final.postman_collection.json](./lab4-final.postman_collection.json),
+select the local Tamagotchi environment (`jwt_secret` and `service_jwt_secret`
+from `.env`) and run the **whole collection** with the Collection Runner, or:
+
+```sh
+npx newman run postman/lab4-final.postman_collection.json -e postman/tamagotchi.local.postman_environment.json
+```
+
+It signs up its own test user, and every run uses fresh ids. A successful run
+has 23 requests (37 with the ones its scripts send) and 60 passing assertions,
+and takes about 5 s.
+
+| Folder | Grade | What it proves |
+| --- | --- | --- |
+| 1. Gateway to broker | 2, 5, 6 | Gateway requests go through the broker's queue to a registered replica (`X-Upstream-Instance`). All 8 services run 2 replicas, each registered with `grpc_port` 9000; Notification registers its six topics. |
+| 2. Internal routes are not public | 8 | Service-to-service routes answer 404 at the gateway, with a user or a service token, and are never relayed. |
+| 3. Log download | 4 | An admin downloads a zip of the last hour's logs; a non-admin gets 403. |
+| 4. Topics | 6, 7 | `GET /api/topics` lists every topic with its subscribers. An event published to `tamagotchi.captured` reaches Notification and shows up in the user's notifications. |
+| 5. Durable queues and dead letters | 9 | An event Notification rejects is stored, dead-lettered, listed from the durable store and retried. |
+| 6. Load-based routing and failover | 10 | Repeated requests reach both replicas; the broker exports queue depth, reroutes, dead letters and chosen-instance load. |
+| 7. Monitoring | 10 | Every Prometheus target is up, every business service exports the shared `tamagotchi_*` metrics, and Grafana is healthy. |
+
+Failover after a breaker trips needs a stopped replica, so it is a manual step:
+`docker kill` one Battle replica, read a battle a few times through the gateway
+(every call returns 200), and `docker compose logs message-broker | grep Rerouting`.
+
 ## Lab 4 broker regression
 
 Import [lab3-broker.postman_collection.json](./lab3-broker.postman_collection.json).

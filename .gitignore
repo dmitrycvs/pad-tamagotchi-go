@@ -7,3 +7,6 @@ postman/*.local.postman_environment.json
 
 # Local source-image verification overrides
 docker-compose.local.yml
+
+# Working notes stay out of the repository (they used to live in docs/).
+/docs/

@@ -33,5 +33,4 @@ data until implemented; missing owner metrics remain visible as down targets.
 
 Container startup readiness and metrics readiness are different checks:
 `docker compose ... up -d --wait` passes, while `check-metrics.py` intentionally
-exits nonzero until owners publish the missing endpoints. All five owned/infrastructure targets now run the published versions recorded
-in `../docs/lab4-releases.json`.
+exits nonzero until owners publish the missing endpoints. All five owned/infrastructure targets now run published versions.

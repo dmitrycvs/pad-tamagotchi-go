@@ -2029,14 +2029,12 @@ all configured peer-transport checks, with
 [postman/lab3-broker.postman_collection.json](./postman/lab3-broker.postman_collection.json).
 Set `service_jwt_secret` only in a local Postman environment. Its 18 edge checks
 verify broker transport and response ownership; they do not by themselves prove
-every calling service's HTTP client implementation. The handoff records actual
-stack results and inaccessible teammate source repositories.
+every calling service's HTTP client implementation.
 
 Released images: Message Broker **1.3.1**, API Gateway **3.3.0**, Service Discovery
 **3.6.0**, Tamagotchi and Notification **4.1.0**, User Management and Battle **4.0.0**,
 Map and Monster Raid **2.3.0**, Guild and Package Registry **3.2.0**. Each submodule
-points at the released commit on `main`. Exact image digests:
-[docs/lab4-releases.json](./docs/lab4-releases.json).
+points at the released commit on `main`.
 
 ### Topics (Lab 4, step 2)
 
@@ -2064,8 +2062,7 @@ reach them through the broker.
 Tamagotchi and Notification also write their logs to the shared
 `/var/log/tamagotchi` folder (`LOG_DIR`) and serve `GET /metrics`.
 
-Current evidence, remaining owner instrumentation and the Topics/gRPC handoff:
-[docs/lab4-handoff.md](./docs/lab4-handoff.md),
+Progress and the end-to-end results of each step:
 [tracking issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55).
 
 ### Step 3: logs, thread-per-request, topic list and gRPC (Lab 4)

@@ -1,0 +1,350 @@
+{
+  "info": {
+    "name": "Lab 5 cache-router check",
+    "description": "Consistent-hash cache sharding (Lab 5, Grades 6 and 7). Run with the Collection Runner against the running stack; cache_router_url is http://localhost:8094.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 Health lists every shard",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Three shards up\", () => { const s = pm.response.json().shards; pm.expect(Object.keys(s)).to.have.length(3); Object.values(s).forEach(v => pm.expect(v).to.eql(\"up\")); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Ring: 150 virtual nodes per shard",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/ring"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const ring = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"450 points, xxhash64\", () => { pm.expect(ring.points).to.eql(450); pm.expect(ring.hash).to.eql(\"xxhash64\"); });",
+              "pm.test(\"Shares cover the circle\", () => pm.expect(ring.shards.reduce((a, s) => a + s.share, 0)).to.be.closeTo(1, 0.001));",
+              "pm.test(\"Each shard within 15% of an even third\", () => ring.shards.forEach(s => pm.expect(Math.abs(s.share * 3 - 1)).to.be.below(0.15)));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Locate a key",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/ring/locate?key=guild:g-1"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200 with shard and virtual node\", () => { pm.response.to.have.status(200); const b = pm.response.json(); pm.expect(b.virtual_node).to.include(b.shard + \"#\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Locate without a key",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/ring/locate"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Simulate adding a shard: ring vs mod N",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/ring/simulate?keys=10000&add=redis-cache-4"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const sim = pm.response.json();",
+              "console.log(sim.summary);",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Ring moves about 1/4 of the keys\", () => pm.expect(sim.ring.moved_share).to.be.within(0.18, 0.32));",
+              "pm.test(\"mod N moves about 3/4\", () => pm.expect(sim.mod_n.moved_share).to.be.within(0.70, 0.80));",
+              "pm.test(\"Every moved key went to the new shard\", () => pm.expect(sim.ring.keys_per_shard_after[\"redis-cache-4:6379\"]).to.eql(sim.ring.moved));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Simulate removing a shard",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/ring/simulate?keys=10000&remove=redis-cache-2"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const sim = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Ring moves only that shard's keys (about 1/3)\", () => pm.expect(sim.ring.moved_share).to.be.within(0.25, 0.40));",
+              "pm.test(\"mod N moves about 2/3\", () => pm.expect(sim.mod_n.moved_share).to.be.above(0.55));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Simulate with both add and remove",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/ring/simulate?add=a&remove=b"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Put a value",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Cache-TTL",
+            "value": "60"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{cache_router_url}}/cache/{{cache_key}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"guild_id\":\"postman\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"cache_key\", \"postman:lab5:\" + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200, stored\", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().stored).to.eql(true); });",
+              "pm.test(\"Names the owning shard\", () => pm.expect(pm.response.headers.get(\"X-Cache-Shard\")).to.match(/^redis-cache-[123]:6379$/));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Get it back (hit)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/cache/{{cache_key}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200, X-Cache HIT\", () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get(\"X-Cache\")).to.eql(\"HIT\"); });",
+              "pm.test(\"Same body\", () => pm.expect(pm.response.json().guild_id).to.eql(\"postman\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Put with an invalid TTL",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Cache-TTL",
+            "value": "7200"
+          }
+        ],
+        "url": "{{cache_router_url}}/cache/{{cache_key}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Delete the key",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{cache_router_url}}/cache/{{cache_key}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Deleted\", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().deleted).to.eql(true); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Get it again (miss)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/cache/{{cache_key}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404, X-Cache MISS\", () => { pm.response.to.have.status(404); pm.expect(pm.response.headers.get(\"X-Cache\")).to.eql(\"MISS\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Delete by prefix on every shard",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{cache_router_url}}/cache?prefix=postman:lab5:"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200 from three shards\", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().shards).to.have.length(3); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Delete without a prefix",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{cache_router_url}}/cache"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Metrics per shard",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{cache_router_url}}/metrics"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Hit, miss and error counters per shard\", () => { const t = pm.response.text(); [\"cache_hits_total{shard=\", \"cache_misses_total{shard=\", \"cache_errors_total{shard=\"].forEach(m => pm.expect(t).to.include(m)); });"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "cache_router_url",
+      "value": "http://localhost:8094"
+    },
+    {
+      "key": "cache_key",
+      "value": ""
+    }
+  ]
+}

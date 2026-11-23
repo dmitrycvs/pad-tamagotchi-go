@@ -1222,6 +1222,8 @@ Success (201 Created):
 
 `GET /api/guilds/{guild_id}`
 Headers: `Authorization: Bearer <jwt>`
+Cached through the cache-router (Lab 5, Guild 3.3.0, `X-Cache: HIT|MISS`); joining, a role change or a
+removal evicts it.
 
 ```json
 {
@@ -1280,7 +1282,8 @@ Success (204 No Content)
 #### Verify Membership
 
 `GET /api/guilds/{guild_id}/members/{user_id}`
-Used by the Monster Raid Service to confirm raid eligibility.
+Used by the Monster Raid Service to confirm raid eligibility. Cached through the cache-router (Lab 5,
+Guild 3.3.0): the reply carries `X-Cache: HIT` or `MISS` and is otherwise unchanged.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1378,6 +1381,8 @@ Success (201 Created):
 
 `GET /api/packages/{package_id}/stat-definitions`
 Consumed by the Battle Service to interpret a Tamagotchi's package-local stats and derive combat bonuses. Different packages may define completely different statistics.
+Cached through the cache-router (Lab 5, Package Registry 3.3.0, `X-Cache: HIT|MISS`); `PUT` on the same
+path evicts it.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1441,6 +1446,8 @@ Headers: `Authorization: Bearer <jwt>` (requires `admin` role)
 #### List Monster Definitions
 
 `GET /api/monsters`
+Cached through the cache-router (Lab 5, Package Registry 3.3.0, `X-Cache: HIT|MISS`); creating a monster
+or changing its status evicts it.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1560,13 +1567,87 @@ Any endpoint can additionally return the errors below. Each carries the header `
 
 ---
 
+### 10. Cache Router
+
+**Base URL:** `http://cache-router:8090` inside the stack (`CACHE_ROUTER_URL`), `http://localhost:8094` from
+the host. Internal only, no authentication. Shards the cache over `redis-cache-1..3` with a consistent hash
+ring (150 virtual nodes per shard, xxhash64). Full contract:
+[cache-router README](./cache-router/README.md); research: [consistent hashing](./cache-router/docs/consistent-hashing.md).
+
+| Method | Path | Success | Errors |
+| --- | --- | --- | --- |
+| GET | `/cache/{key}` | 200, the stored body with its `Content-Type`, `X-Cache: HIT`, `X-Cache-Shard` | 404 `Cache miss.` (`X-Cache: MISS`; plus `X-Cache-Error: shard unavailable` when the shard is down), 400 invalid key |
+| PUT | `/cache/{key}` (body = value, `X-Cache-TTL: 1..3600`) | 200 `{ "key", "shard", "ttl_seconds", "stored": true }` | 400 bad TTL or key, 413 value over 1 MiB; a down shard gives `"stored": false` |
+| DELETE | `/cache/{key}` | 200 `{ "key", "shard", "deleted": true }` | 400; a down shard gives `"deleted": false, "error"` |
+| DELETE | `/cache?prefix=registry:` | 200 `{ "prefix", "deleted", "shards": [{ "shard", "deleted", "error"? }] }` (SCAN + UNLINK on every shard) | 400 without `prefix` |
+| GET | `/ring` | 200 `{ "hash": "xxhash64", "virtual_nodes_per_shard": 150, "points": 450, "shards": [{ "shard", "virtual_nodes", "share", "share_percent" }] }` | |
+| GET | `/ring/locate?key=` | 200 `{ "key", "hash", "shard", "virtual_node", "point" }` | 400 without `key` |
+| GET | `/ring/simulate?keys=10000&add=redis-cache-4` (or `remove=`) | 200 `{ "keys", "change", "shards_before", "shards_after", "ideal_moved_share", "ring": { "moved", "moved_share", "keys_per_shard_after" }, "mod_n": { ... }, "summary" }` | 400 for both/neither of `add`/`remove`, `keys` outside 1–1000000, a shard already on / not on the ring |
+| GET | `/health`, `/metrics` | shared health shape plus `"shards": { "redis-cache-1:6379": "up" }`; `cache_hits_total`, `cache_misses_total`, `cache_errors_total` per shard | |
+
+A shard that is down never fails the caller: reads miss, writes report `stored: false`. Services fall back
+to their database on any cache error.
+
+### 11. Message Broker: Saga Transactions
+
+**Base URL:** `http://message-broker:8070` (service JWT), or gRPC `Broker.Transact` on `message-broker:9070`.
+Long-running saga transactions with the coordinator in the broker (Lab 5, Grade 9, broker 1.4.0). Full
+contract, retry rules and the battle settlement saga:
+[broker README, "Transactions"](./message-broker/README.md#transactions).
+
+`POST /api/transactions?wait=<seconds>`
+
+```json
+{
+  "tx_id": "battle-42-settlement",
+  "steps": [
+    {
+      "service": "user-management-service",
+      "method": "POST",
+      "path": "/api/users/u-1/currency",
+      "body": { "event_id": "battle-42-reward", "currency": "global", "amount": 120 },
+      "compensation": {
+        "method": "POST",
+        "path": "/api/users/u-1/currency",
+        "body": { "event_id": "battle-42-reward-undo", "currency": "global", "amount": -120 }
+      }
+    }
+  ]
+}
+```
+
+Success: **200** when the saga finished, **202** (`Location: /api/transactions/{tx_id}`) while it still runs:
+
+```json
+{
+  "tx_id": "battle-42-settlement",
+  "status": "completed",
+  "phase": "done",
+  "error": null,
+  "steps": [
+    { "step": 1, "service": "user-management-service", "status": "completed", "error": null, "http_status": 200, "attempts": 1, "compensation_attempts": 0, "response": { "balance": 1370 } }
+  ]
+}
+```
+
+`status` is `running`, `completed`, `compensated` (a step failed and the completed ones were undone in
+reverse order) or `failed` (a compensation kept failing). The same `tx_id` returns the stored state.
+Errors: 400 invalid transaction (POST/PATCH bodies need an `event_id`; every step but a read or the last
+needs a `compensation` with its own `event_id`), 401, 403 for admin-only routes, 409 `tx_id` reused with
+different steps, 503 store unavailable.
+
+`GET /api/transactions/{tx_id}` returns the same shape (404 `Transaction not found.`);
+`GET /api/transactions?status=running&limit=50` returns `{ "transactions": [...], "count", "durable" }`.
+
+---
+
 ## Running the Services
 
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **8 GB** of free RAM for the complete application and monitoring stack (25 long-running containers plus two initialization/readiness jobs)
-- Ports **3000**, **5432**, **8070**, **8080**, **8082–8093**, **8761**, **9070** and **9090** free on the host
+- Roughly **8 GB** of free RAM for the complete application and monitoring stack (29 long-running containers plus two initialization/readiness jobs)
+- Ports **3000**, **5432**, **8070**, **8080**, **8082–8094**, **8761**, **9070** and **9090** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1605,10 +1686,12 @@ matching `TAG_*` to `dev` in `.env`.
 | Notification          | `dmitrycvs/notification-service:4.1.0`      | —              |
 | Map                   | `takima/pad-map-service:2.3.0`              | 8085–8087      |
 | Monster Raid          | `takima/pad-monster-raid-service:2.3.0`     | 8088–8090      |
-| Guild                 | `maxkostov/guild-service:3.2.0`             | 8091–8093      |
-| Package Registry      | `maxkostov/package-registry-service:3.2.0`  | —              |
+| Guild                 | `maxkostov/guild-service:3.3.0`             | 8091–8093      |
+| Package Registry      | `maxkostov/package-registry-service:3.3.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
-| **Message Broker**    | `maxkostov/message-broker:1.3.1`            | **8070**, 9070 |
+| **Message Broker**    | `maxkostov/message-broker:1.4.0`            | **8070**, 9070 |
+| **Cache Router**      | `maxkostov/cache-router:1.0.0`              | **8094** (→ 8090) |
+| Cache shards          | `redis:7.4-alpine` × 3 (`redis-cache-1..3`) | —              |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -1870,7 +1953,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, `message-broker`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, `message-broker`, `cache-router`, `etl-service`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix        | Purpose                                | Example                                     |
@@ -2206,3 +2289,47 @@ max_concurrent`; ties take turns. Every send logs `load=0.050 in_flight=4+1 max_
 
 User Management and Battle 4.0.0 serve `GET /metrics`, write `/var/log/tamagotchi/<service>/<instance_id>.log`,
 fire their notification topics and speak gRPC with the broker (`BROKER_GRPC_URL`, `GRPC_PORT: 9000`).
+
+## Lab 5: Sharding and Replication
+
+Step 1 of the Lab 5 Work Queue (Maxim): the contracts the rest of the lab builds on. Tracking issue:
+[#70](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/70).
+
+| Grade | Requirement | Where |
+| --- | --- | --- |
+| 5 | Replication + failover (database side: Denis) | Broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
+| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, both evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
+| 7 | Consistent hashing research; cache sharded with it | [docs/consistent-hashing.md](./cache-router/docs/consistent-hashing.md) (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots); `GET /ring/simulate` |
+| 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions), battle settlement saga for Filip |
+| 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), `X-Cache` on the cached Guild and Package Registry reads |
+
+### Cache sharding
+
+```sh
+curl -s http://localhost:8094/ring                                          # shards and their share of the ring
+curl -s "http://localhost:8094/ring/locate?key=guild:g-1"                   # owner of one key
+curl -s "http://localhost:8094/ring/simulate?keys=10000&add=redis-cache-4"  # keys moved: ring ~24%, mod N ~75%
+docker compose stop redis-cache-2                                           # its keys now miss; nothing fails
+curl -s http://localhost:8094/health                                        # "redis-cache-2:6379": "down"
+docker compose start redis-cache-2
+```
+
+The router publishes host port **8094**, not 8090: Monster Raid publishes its replicas on 8088–8090, and
+Docker picks any free port of that range. Inside the stack every service uses
+`CACHE_ROUTER_URL=http://cache-router:8090`.
+
+With the stack's three shard names and 150 virtual nodes, the shards own 32.1%, 30.5% and 37.4% of the
+ring. The spread of a shard's share is about 1/√150 ≈ 8% (1σ), so ±10% is not guaranteed at 150;
+`CACHE_VIRTUAL_NODES=500` brings every shard within ±4% ([measurements](./cache-router/docs/consistent-hashing.md#3-virtual-nodes)).
+
+### Environment every service now gets
+
+| Variable | Value | Used by |
+| --- | --- | --- |
+| `CACHE_ROUTER_URL` | `http://cache-router:8090` | Gateway and all eight business services; empty disables caching. Guild and Package Registry use it now; other owners can adopt it (`GET`/`PUT`/`DELETE /cache/{key}`, any error = read the database) |
+| `CACHE_TTL_SECONDS`, `CACHE_TIMEOUT_MS` | per service; Guild 60 s / 300 ms, Package Registry 300 s / 300 ms by default | Guild, Package Registry |
+| `DATABASE_URL` (broker) | `postgres://u:p@postgres-0:5432,postgres-1:5432,postgres-2:5432/message_broker?target_session_attrs=read-write` once the database is replicated | Message Broker 1.4.0 |
+| `BROKER_SAGA_WAIT`, `BROKER_SAGA_STEP_ATTEMPTS`, `BROKER_SAGA_COMPENSATION_ATTEMPTS` | `10s`, `5`, `10` | Message Broker 1.4.0 |
+
+Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**.
+

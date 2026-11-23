@@ -10,6 +10,53 @@ services:
       timeout: 3s
       retries: 10
 
+  # Lab 5: cache shards. The cache-router spreads keys over them with a consistent hash ring;
+  # they hold only cached copies (no persistence) and evict the least recently used key when full.
+  redis-cache-1: &redis-cache
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "${CACHE_SHARD_MAXMEMORY:-64mb}", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-cache-2: *redis-cache
+
+  redis-cache-3: *redis-cache
+
+  cache-router:
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/cache-router:${TAG_CACHE_ROUTER:-1.0.0}
+    restart: unless-stopped
+    depends_on:
+      redis-cache-1:
+        condition: service_healthy
+      redis-cache-2:
+        condition: service_healthy
+      redis-cache-3:
+        condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: 8090
+      CACHE_SHARDS: redis-cache-1:6379,redis-cache-2:6379,redis-cache-3:6379
+      CACHE_VIRTUAL_NODES: ${CACHE_VIRTUAL_NODES:-150}
+      CACHE_SHARD_TIMEOUT: ${CACHE_SHARD_TIMEOUT:-250ms}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      LOG_DIR: /var/log/tamagotchi
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
+    # Host port for the demo (GET /ring, /ring/simulate). Not 8090: Monster Raid publishes 8088-8090.
+    ports:
+      - "127.0.0.1:${CACHE_ROUTER_HOST_PORT:-8094}:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   postgres:
     image: postgis/postgis:16-3.4
     container_name: tamagotchi-go-postgres
@@ -93,6 +140,7 @@ services:
       WS_PUBLIC_URL_MONSTER_RAID: ${WS_PUBLIC_URL_MONSTER_RAID:-ws://localhost:8088}
       WS_PUBLIC_URL_GUILD: ${WS_PUBLIC_URL_GUILD:-ws://localhost:8091}
       WS_PUBLIC_INSTANCE_URLS: '${WS_PUBLIC_INSTANCE_URLS:-{}}'
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     ports:
@@ -125,6 +173,7 @@ services:
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
       # Lab 4: friend requests fire user.friend_request_received through the broker (gRPC Broker.Publish), the
@@ -160,6 +209,7 @@ services:
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
       # Lab 4: peer calls go through Broker.Call (gRPC), battle requests fire battle.request_received, the broker
@@ -205,6 +255,7 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
       PACKAGE_REGISTRY_SERVICE_URL: http://message-broker:8070/q/package-registry-service
       NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     deploy:
@@ -236,6 +287,7 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
       FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON}
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     deploy:
@@ -271,6 +323,7 @@ services:
       USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
       NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
       PROXIMITY_THRESHOLD_METERS: ${PROXIMITY_THRESHOLD_METERS:-6}
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     deploy:
@@ -310,6 +363,7 @@ services:
       TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
       PACKAGE_REGISTRY_SERVICE_URL: http://message-broker:8070/q/package-registry-service
       NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       PORT: 8080
     deploy:
@@ -319,7 +373,7 @@ services:
       - "8088-8090:8080"
 
   guild-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.2.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -344,6 +398,7 @@ services:
       API_GATEWAY_URL: http://api-gateway:8080
       USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
       NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       GRPC_PORT: 9000
       BROKER_GRPC_URL: http://message-broker:9070
@@ -355,7 +410,7 @@ services:
       - "8091-8093:8080"
 
   package-registry-service:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.2.0}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -377,6 +432,7 @@ services:
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-100}
       USER_MANAGEMENT_SERVICE_URL: http://message-broker:8070/q/user-management-service
       TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
+      CACHE_ROUTER_URL: ${CACHE_ROUTER_URL:-http://cache-router:8090}
       SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
       GRPC_PORT: 9000
       BROKER_GRPC_URL: http://message-broker:9070
@@ -393,7 +449,7 @@ services:
       - tamagotchi-logs:/var/log/tamagotchi
 
   message-broker:
-    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.3.1}
+    image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.4.0}
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -410,7 +466,13 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       # Lab 4 step 4: durable queues and the dead letter channel (broker 1.3.0+; older images ignore these).
+      # Broker 1.4.0 also takes a host list for a replicated database (README, Lab 5):
+      # postgres://u:p@postgres-0:5432,postgres-1:5432,postgres-2:5432/message_broker?target_session_attrs=read-write
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/message_broker
+      # Lab 5 saga transactions (broker 1.4.0): POST /api/transactions; the saga log is in the same database.
+      BROKER_SAGA_WAIT: ${BROKER_SAGA_WAIT:-10s}
+      BROKER_SAGA_STEP_ATTEMPTS: ${BROKER_SAGA_STEP_ATTEMPTS:-5}
+      BROKER_SAGA_COMPENSATION_ATTEMPTS: ${BROKER_SAGA_COMPENSATION_ATTEMPTS:-10}
       BROKER_RETRY_MAX_ATTEMPTS: ${BROKER_RETRY_MAX_ATTEMPTS:-5}
       BROKER_RETRY_INITIAL_BACKOFF: ${BROKER_RETRY_INITIAL_BACKOFF:-1s}
       BROKER_RETRY_MAX_BACKOFF: ${BROKER_RETRY_MAX_BACKOFF:-60s}

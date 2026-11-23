@@ -33,3 +33,6 @@
 [submodule "message-broker"]
 	path = message-broker
 	url = https://github.com/MaxKostov/message-broker.git
+[submodule "cache-router"]
+	path = cache-router
+	url = https://github.com/MaxKostov/cache-router.git

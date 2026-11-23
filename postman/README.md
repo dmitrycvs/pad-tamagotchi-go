@@ -116,3 +116,17 @@ The transport folder verifies broker selection and target replies; it does not
 execute every source service's HTTP client. Full battle/raid/proximity and
 Firebase delivery remain separate integration scenarios. See [issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55)
 for actual results and owner blockers.
+
+## Lab 5: cache-router check
+
+[lab5-cache.postman_collection.json](./lab5-cache.postman_collection.json) checks the consistent-hash
+cache (15 requests). Run it with the Collection Runner against the running stack; `cache_router_url`
+defaults to `http://localhost:8094` and needs no token (the router is internal-only and bound to
+loopback). It checks the ring (450 points, every shard within 15% of an even third), key location, the
+`/ring/simulate` proof (adding a shard moves about 1/4 of the keys on the ring and about 3/4 with
+mod N, all to the new shard), a put/get/delete round trip with `X-Cache` and `X-Cache-Shard`, TTL and
+prefix validation, and the per-shard metrics.
+
+Saga transactions are in the broker's own collection
+([message-broker/postman](../message-broker/postman/message-broker.postman_collection.json), requests 31–37).
+

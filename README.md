@@ -1746,6 +1746,10 @@ volumes `postgres-data` (the volume of the single instance before Lab 5, so its 
 `postgres-1-data`, `postgres-2-data` and `data-warehouse-data`. `docker compose down` keeps them and
 `docker compose down -v` discards them.
 
+**Upgrading from Lab 4:** run `docker compose down` (without `-v`) on the old version first. The old `postgres`
+container uses the volume that `postgres-0` takes over. Then update the `TAG_*` values in `.env`: Map and Monster
+Raid need 2.4.0 or newer.
+
 ### Service Images
 
 Compose always pulls each service image from DockerHub with a versioned tag; it

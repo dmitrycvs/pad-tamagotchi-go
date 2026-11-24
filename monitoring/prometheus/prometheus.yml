@@ -8,6 +8,17 @@ scrape_configs:
     http_sd_configs:
       - url: http://message-broker:8070/api/monitoring/targets
         refresh_interval: 5s
+  # Lab 5 services outside the broker's queue list, so its target adapter does not return them.
+  - job_name: tamagotchi-lab5
+    static_configs:
+      - targets: [etl-service:8080]
+        labels:
+          service: etl-service
+          instance_id: etl-service
+      - targets: [cache-router:8090]
+        labels:
+          service: cache-router
+          instance_id: cache-router
   - job_name: prometheus
     static_configs:
       - targets: [localhost:9090]

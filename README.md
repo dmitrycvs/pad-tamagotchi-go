@@ -1650,7 +1650,7 @@ Map 2.4.0 and Monster Raid 2.4.0 answer `503 {"error":"Database unavailable. Ret
 
 **Base URL:** `http://etl-service:8080` inside the stack, `http://localhost:8095` from the host. Internal:
 not routed by the gateway or the broker. Headers: `Authorization: Bearer <service_jwt>` on every endpoint.
-Full documentation: [etl-service README](https://github.com/aXeeDENt/etl-service).
+Full documentation: [etl-service README](https://github.com/MaxKostov/etl-service).
 
 #### Trigger a Run
 

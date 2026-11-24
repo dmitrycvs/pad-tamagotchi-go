@@ -38,4 +38,4 @@
 	url = https://github.com/MaxKostov/cache-router.git
 [submodule "etl-service"]
 	path = etl-service
-	url = https://github.com/aXeeDENt/etl-service.git
+	url = https://github.com/MaxKostov/etl-service.git

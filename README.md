@@ -1889,7 +1889,7 @@ others.
 | **Failure** | The call **times out**, has a **connection error** (refused, unknown host, reset), or gets a **5xx** response. A 4xx is the caller's problem and is not counted. |
 | **Trip** | **3 failures within the caller's request timeout x 3.5**: 8 s x 3.5 = **28 s** for the services, 10 s x 3.5 = **35 s** for the gateway. Successes in between do not reset the count. |
 | **On trip** | Log at **ERROR** with the target, the endpoint, the error count and the window (format below). |
-| **Open** | **Fail fast** for a cooldown (default: the window): no call is made, and the caller answers `503 { "error": "Upstream service unavailable." }`. The gateway first tries the other instances of the service and only answers 503 when every instance's breaker is open. |
+| **Open** | **Fail fast** for a cooldown (default: the window; 5 s in Compose since Lab 5): no call is made, and the caller answers `503 { "error": "Upstream service unavailable." }`. The gateway first tries the other instances of the service and only answers 503 when every instance's breaker is open. |
 | **Half-open** | After the cooldown, **one probe call** goes through. Success closes the breaker; failure opens it again for another cooldown. |
 | **Not covered** | Calls to Service Discovery itself: the registration contract already retries them with backoff. |
 
@@ -2425,18 +2425,19 @@ Connection strings:
 
 ```text
 Go, broker   postgres://<user>:<password>@postgres-0:5432,postgres-1:5432,postgres-2:5432/<db>?target_session_attrs=read-write
-C# (Npgsql)  Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=<db>;Username=<user>;Password=<password>;Target Session Attributes=primary;Host Recheck Seconds=2;Timeout=3
+C# (Npgsql)  Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=<db>;Username=<user>;Password=<password>;Target Session Attributes=primary;Host Recheck Seconds=1;Timeout=3
 ```
 
 - User Management and Battle also need the Npgsql form: their `postgres://` support does not know host lists.
 - Npgsql: do not put `Target Session Attributes` into an `NpgsqlDataSourceBuilder` (or EF Core's
   `UseNetTopologySuite`/`MapEnum`, which create one): it throws. Build with `BuildMultiHost()` and use
   `.WithTargetSession(TargetSessionAttributes.Primary)`, as Map's `ReplicatedDatabase.cs` does.
-- `Host Recheck Seconds=2` matters: Npgsql remembers for 10 s by default that a node is a standby or down.
+- `Host Recheck Seconds=1` matters: Npgsql remembers for 10 s by default that a node is a standby or down.
 - Looking up a *stopped* container's name takes Docker Desktop about 4 s, so every database client has
-  `dns_opt: timeout:1, attempts:1`.
-- A failover gives every replica 5xx answers, which open the broker's circuit breakers, so their cooldown
-  is 5 s (`CIRCUIT_BREAKER_COOLDOWN`) instead of the 35 s window.
+  `dns_opt: timeout:1, attempts:1`. The C# services and the PostgreSQL nodes also have `dns: 127.0.0.1`, which
+  makes that lookup fail within milliseconds; they cannot resolve names outside the stack.
+- A failover gives every replica 5xx answers, which open circuit breakers, so Compose sets their cooldown to 5 s
+  instead of the window: `CIRCUIT_BREAKER_COOLDOWN` (broker) and `CIRCUIT_BREAKER_COOLDOWN_SECONDS` (all services).
 
 **Demo.**
 
@@ -2452,10 +2453,11 @@ docker compose start postgres-0                 # rejoins as a standby by itself
 docker compose logs postgres-0 | grep '\[node'  # ... took over: rejoining as a standby, pg_rewind finished
 ```
 
-Measured with two requests per second to each of the eight services through the gateway (reads, plus writes to
-Map): the standby was promoted 7 s after the first failed check, and the last failed request ended 8–11 s after
-`docker compose stop`. All eight services and the broker reconnected without a restart. While `postgres-0` stays
-down, some requests to the C# services take up to 1 s longer, because Npgsql checks the first host again.
+Measured with the released images, two requests per second to each of the eight services through the gateway
+(reads, plus writes to Map), in four failovers in a row: the standby was promoted 6–8 s after the first failed
+check, and the last failed request ended 4–11.5 s after `docker compose stop`. All eight services and the broker
+reconnected without a restart. Under more load, User Management or Battle can answer 500 often enough to open a
+breaker; the broker then removes the instance until its next heartbeat, so those two can need about 20 s.
 
 **How an old primary rejoins.** `docker compose start` (or `up -d`) the node: its entrypoint sees another name
 in `/cluster/primary`, runs `pg_rewind` against the current primary, creates `standby.signal` and starts. If

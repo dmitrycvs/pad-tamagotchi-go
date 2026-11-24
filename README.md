@@ -24,7 +24,7 @@ The **API Gateway** authenticates external clients and relays their requests to 
 | - | -------------------------- | ----------------------------------------------------- |
 | 1 | **Costov Maxim**     | Guild Service, Package Registry Service               |
 | 2 | **Cvasiuc Dmitrii**  | Tamagotchi Service, Notification Service, API Gateway |
-| 3 | **Tatarintev Denis** | Map Service, Monster Raid Service                     |
+| 3 | **Tatarintev Denis** | Map Service, Monster Raid Service, ETL Service        |
 | 4 | **Obrijan Filip**    | User Management Service, Battle Service               |
 
 Services are paired by coupling: each owner holds the two services that talk to each other most often, which keeps cross-owner coordination to the documented contract below.
@@ -991,6 +991,7 @@ Headers: `Authorization: Bearer <jwt>`
 #### Get a Single User's Last Known Location
 
 `GET /api/map/users/{user_id}/location`
+Cached through the cache-router for 5 s (Lab 5, Map 2.4.0, `X-Cache: HIT|MISS`); a new location evicts it.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1036,6 +1037,7 @@ Server → Client:
 #### List Active Raids
 
 `GET /api/raids?guild_id={guild_id}&status=active`
+Cached through the cache-router for 5 s (Lab 5, Monster Raid 2.4.0, `X-Cache: HIT|MISS`); schedule, join and damage evict it.
 Headers: `Authorization: Bearer <jwt>`
 
 ```json
@@ -1058,6 +1060,7 @@ Headers: `Authorization: Bearer <jwt>`
 #### Get Raid Details
 
 `GET /api/raids/{raid_id}`
+Cached through the cache-router for 5 s (Lab 5, Monster Raid 2.4.0, `X-Cache: HIT|MISS`); join and damage evict it.
 Headers: `Authorization: Bearer <jwt>`
 
 ```json
@@ -1143,6 +1146,7 @@ Success (200 OK):
 #### Get Raid Leaderboard
 
 `GET /api/raids/{raid_id}/leaderboard`
+Cached through the cache-router for 5 s (Lab 5, Monster Raid 2.4.0, `X-Cache: HIT|MISS`); join and damage evict it.
 Headers: `Authorization: Bearer <jwt>`
 
 ```json
@@ -1639,6 +1643,77 @@ different steps, 503 store unavailable.
 `GET /api/transactions/{tx_id}` returns the same shape (404 `Transaction not found.`);
 `GET /api/transactions?status=running&limit=50` returns `{ "transactions": [...], "count", "durable" }`.
 
+Map 2.4.0 and Monster Raid 2.4.0 answer `503 {"error":"Database unavailable. Retry shortly."}` with
+`Retry-After: 1` when a database failover takes longer than 5 s.
+
+### 12. ETL Service
+
+**Base URL:** `http://etl-service:8080` inside the stack, `http://localhost:8095` from the host. Internal:
+not routed by the gateway or the broker. Headers: `Authorization: Bearer <service_jwt>` on every endpoint.
+Full documentation: [etl-service README](https://github.com/aXeeDENt/etl-service).
+
+#### Trigger a Run
+
+`POST /api/etl/runs`
+
+Success (202 Accepted, `Location: /api/etl/runs/{run_id}`):
+
+```json
+{ "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc", "status": "running", "trigger": "manual", "started_at": "2026-11-24T13:24:28.604Z" }
+```
+
+Error (409 Conflict):
+
+```json
+{ "error": "An ETL run is already in progress.", "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc" }
+```
+
+#### Get a Run
+
+`GET /api/etl/runs/{run_id}`
+
+```json
+{
+  "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc",
+  "trigger": "manual",
+  "status": "succeeded",
+  "started_at": "2026-11-24T13:24:28.604Z",
+  "finished_at": "2026-11-24T13:24:28.768Z",
+  "duration_ms": 152,
+  "rows_extracted": 28,
+  "rows_loaded": 3,
+  "error": null,
+  "tables": [
+    { "table": "fact_battle", "status": "succeeded", "rows_extracted": 2, "rows_loaded": 1, "duration_ms": 20, "error": null }
+  ]
+}
+```
+
+`trigger` is `schedule` or `manual`. `status` is `running`, `succeeded`, `partial` (some tables failed) or
+`failed`. `rows_loaded` counts rows that were inserted or changed, so loading the same rows again gives 0.
+`tables` has one entry per warehouse table.
+
+Error (404 Not Found):
+
+```json
+{ "error": "ETL run not found." }
+```
+
+#### List Runs
+
+`GET /api/etl/runs?limit=20` (newest first, `limit` 1–100)
+
+```json
+{ "runs": [ { "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc", "status": "succeeded" } ], "count": 1 }
+```
+
+Each run has the shape of *Get a Run*. Error (400): `{ "error": "limit must be a whole number from 1 to 100." }`.
+
+Every endpoint also answers 401 `{ "error": "Missing or invalid service token." }`, 403
+`{ "error": "A service token is required." }` and 503 `{ "error": "Data warehouse unavailable." }`.
+`GET /health` and `GET /metrics` need no token; metrics add `etl_runs_total`, `etl_rows_extracted_total`,
+`etl_rows_loaded_total`, `etl_last_run_duration_seconds` and `etl_last_success_timestamp_seconds`.
+
 ---
 
 ## Running the Services
@@ -1646,8 +1721,8 @@ different steps, 503 store unavailable.
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **8 GB** of free RAM for the complete application and monitoring stack (29 long-running containers plus two initialization/readiness jobs)
-- Ports **3000**, **5432**, **8070**, **8080**, **8082–8094**, **8761**, **9070** and **9090** free on the host
+- Roughly **8 GB** of free RAM for the complete application and monitoring stack (34 long-running containers plus two initialization/readiness jobs)
+- Ports **3000**, **5432–5435**, **8070**, **8080**, **8082–8095**, **8761**, **9070** and **9090** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1663,11 +1738,13 @@ docker compose up -d
 Firebase service-account JSON. Nothing in this repository contains real secrets;
 `.env.example` documents the shape only.
 
-The database is a single **PostGIS-enabled PostgreSQL 16** instance. Each service
-owns a separate logical database inside it, created on first boot by
-[`db/init/01-create-databases.sql`](./db/init/01-create-databases.sql). Data
-persists in the named volume `postgres-data`, so `docker compose down` keeps it
-and `docker compose down -v` discards it.
+The database is a replicated **PostGIS-enabled PostgreSQL 16**: the primary `postgres-0` and the hot
+standbys `postgres-1` and `postgres-2` ([Database replication and failover](#database-replication-and-failover)).
+Each service owns a separate logical database inside it, created on first boot by
+[`db/init/01-create-databases.sql`](./db/init/01-create-databases.sql). Data persists in the named
+volumes `postgres-data` (the volume of the single instance before Lab 5, so its data is kept),
+`postgres-1-data`, `postgres-2-data` and `data-warehouse-data`. `docker compose down` keeps them and
+`docker compose down -v` discards them.
 
 ### Service Images
 
@@ -1684,14 +1761,18 @@ matching `TAG_*` to `dev` in `.env`.
 | Battle                | `filipel2004/battle-service:4.0.0`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:4.1.0`        | —              |
 | Notification          | `dmitrycvs/notification-service:4.1.0`      | —              |
-| Map                   | `takima/pad-map-service:2.3.0`              | 8085–8087      |
-| Monster Raid          | `takima/pad-monster-raid-service:2.3.0`     | 8088–8090      |
+| Map                   | `takima/pad-map-service:2.4.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.4.0`     | 8088–8090      |
 | Guild                 | `maxkostov/guild-service:3.3.0`             | 8091–8093      |
 | Package Registry      | `maxkostov/package-registry-service:3.3.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
 | **Message Broker**    | `maxkostov/message-broker:1.4.0`            | **8070**, 9070 |
 | **Cache Router**      | `maxkostov/cache-router:1.0.0`              | **8094** (→ 8090) |
 | Cache shards          | `redis:7.4-alpine` × 3 (`redis-cache-1..3`) | —              |
+| **ETL**               | `takima/etl-service:1.0.0`                  | **8095** (→ 8080) |
+| PostgreSQL nodes      | `postgis/postgis:16-3.4` × 3 (`postgres-0..2`) | **5432**, 5434, 5435 |
+| Failover monitor      | `postgres:16-alpine` (`postgres-failover`)  | —              |
+| Data warehouse        | `postgres:16-alpine` (`data-warehouse`)     | **5433**       |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -2292,16 +2373,17 @@ fire their notification topics and speak gRPC with the broker (`BROKER_GRPC_URL`
 
 ## Lab 5: Sharding and Replication
 
-Step 1 of the Lab 5 Work Queue (Maxim): the contracts the rest of the lab builds on. Tracking issue:
+Steps 1 (Maxim: the contracts the rest of the lab builds on) and 2 (Denis: replication, warehouse, ETL) of the Lab 5 Work Queue. Tracking issue:
 [#70](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/70).
 
 | Grade | Requirement | Where |
 | --- | --- | --- |
-| 5 | Replication + failover (database side: Denis) | Broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
-| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, both evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
+| 4 | Data warehouse and ETL | [Data warehouse and ETL](#data-warehouse-and-etl), [12. ETL Service](#12-etl-service) |
+| 5 | Replication + failover | [Database replication and failover](#database-replication-and-failover); broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
+| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
 | 7 | Consistent hashing research; cache sharded with it | [docs/consistent-hashing.md](./cache-router/docs/consistent-hashing.md) (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots); `GET /ring/simulate` |
 | 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions), battle settlement saga for Filip |
-| 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), `X-Cache` on the cached Guild and Package Registry reads |
+| 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), [12. ETL Service](#12-etl-service), `X-Cache` on the cached Guild, Package Registry, Monster Raid and Map reads |
 
 ### Cache sharding
 
@@ -2322,14 +2404,120 @@ With the stack's three shard names and 150 virtual nodes, the shards own 32.1%, 
 ring. The spread of a shard's share is about 1/√150 ≈ 8% (1σ), so ±10% is not guaranteed at 150;
 `CACHE_VIRTUAL_NODES=500` brings every shard within ±4% ([measurements](./cache-router/docs/consistent-hashing.md#3-virtual-nodes)).
 
+### Database replication and failover
+
+`postgres-0` (the first primary), `postgres-1` and `postgres-2` run `postgis/postgis:16-3.4` with streaming
+replication, one replication slot per standby and the same settings, including
+`max_prepared_transactions=64` for two-phase commit. Replication is asynchronous: a commit the primary
+acknowledged in the last moment before it died may be missing on the promoted standby.
+
+| Part | What it does |
+| --- | --- |
+| [`db/replication/node-entrypoint.sh`](./db/replication/node-entrypoint.sh) | Starts every node as the primary, as a standby (`pg_basebackup -R -X stream`) or as an old primary that rejoins (`pg_rewind`, otherwise a new clone). Standbys connect to all three hosts with `target_session_attrs=read-write`, so they follow a promoted one |
+| [`db/failover/failover.sh`](./db/failover/failover.sh) | `postgres-failover`: checks the primary every 2 s. After 3 failures it promotes the standby with the highest replay position (`pg_promote()`), logs the switch and alerts Discord if `DISCORD_WEBHOOK_URL` is set. Services wait for this container, which is healthy while some node accepts writes |
+| volume `postgres-cluster` | `/cluster/primary`, the name of the current primary. Only the monitor writes it, *before* it promotes, so a node that comes back always knows whether it may accept writes. One that still does is stopped within about 2 s (fencing) |
+
+Connection strings:
+
+```text
+Go, broker   postgres://<user>:<password>@postgres-0:5432,postgres-1:5432,postgres-2:5432/<db>?target_session_attrs=read-write
+C# (Npgsql)  Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=<db>;Username=<user>;Password=<password>;Target Session Attributes=primary;Host Recheck Seconds=2;Timeout=3
+```
+
+- User Management and Battle also need the Npgsql form: their `postgres://` support does not know host lists.
+- Npgsql: do not put `Target Session Attributes` into an `NpgsqlDataSourceBuilder` (or EF Core's
+  `UseNetTopologySuite`/`MapEnum`, which create one): it throws. Build with `BuildMultiHost()` and use
+  `.WithTargetSession(TargetSessionAttributes.Primary)`, as Map's `ReplicatedDatabase.cs` does.
+- `Host Recheck Seconds=2` matters: Npgsql remembers for 10 s by default that a node is a standby or down.
+- Looking up a *stopped* container's name takes Docker Desktop about 4 s, so every database client has
+  `dns_opt: timeout:1, attempts:1`.
+- A failover gives every replica 5xx answers, which open the broker's circuit breakers, so their cooldown
+  is 5 s (`CIRCUIT_BREAKER_COOLDOWN`) instead of the 35 s window.
+
+**Demo.**
+
+```sh
+docker compose exec postgres-0 sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "SELECT application_name, state, sync_state, replay_lsn FROM pg_stat_replication"'  # 2 replicas
+docker compose logs -f postgres-failover &
+docker compose stop postgres-0                  # the primary is gone
+# postgres-failover: check failed (1/3) ... (3/3), FAILOVER: promoted postgres-1
+curl -s http://localhost:8080/api/packages/<package_id> -H "Authorization: Bearer <jwt>"   # 503 for a few seconds, then 200
+docker compose exec postgres-failover cat /cluster/primary; echo                           # postgres-1
+docker compose exec postgres-1 sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "SELECT application_name, state FROM pg_stat_replication"'  # postgres-2
+docker compose start postgres-0                 # rejoins as a standby by itself
+docker compose logs postgres-0 | grep '\[node'  # ... took over: rejoining as a standby, pg_rewind finished
+```
+
+Measured with two requests per second to each of the eight services through the gateway (reads, plus writes to
+Map): the standby was promoted 7 s after the first failed check, and the last failed request ended 8–11 s after
+`docker compose stop`. All eight services and the broker reconnected without a restart. While `postgres-0` stays
+down, some requests to the C# services take up to 1 s longer, because Npgsql checks the first host again.
+
+**How an old primary rejoins.** `docker compose start` (or `up -d`) the node: its entrypoint sees another name
+in `/cluster/primary`, runs `pg_rewind` against the current primary, creates `standby.signal` and starts. If
+`pg_rewind` fails, it clones again. A standby that diverged, or whose WAL the primary no longer has, is rewound
+or cloned after about 20 s without progress. To force a new clone of one node, for example `postgres-2` while it
+is a standby: `docker compose rm -sf postgres-2 && docker volume rm tamagotchi-go_postgres-2-data && docker compose up -d postgres-2`.
+
+Also tested: a frozen primary (`docker compose pause`) that wakes up after the failover is fenced and rejoins; a
+killed primary (`kill -s KILL`) is rewound; a prepared transaction survives the failover; a lost standby volume is
+cloned; a restart of all nodes keeps the current primary.
+
+### Data warehouse and ETL
+
+`data-warehouse` is a separate, non-replicated `postgres:16-alpine` (database `tamagotchi_dw`, host port 5433) with
+a star schema from [`db/warehouse`](./db/warehouse):
+
+| Table | From | Grain |
+| --- | --- | --- |
+| `dim_user`, `dim_tamagotchi`, `dim_package`, `dim_guild`, `dim_date` | User Management, Tamagotchi, Package Registry, Guild | surrogate keys; key 0 is "unknown" |
+| `fact_battle` | Battle | one battle |
+| `fact_raid_damage` | Monster Raid | one participant of a raid |
+| `fact_currency_change` | User Management (`IdempotencyRecords`: the balance after each change, so the amount is the difference) | one applied change |
+| `fact_notification` | Notification | one notification |
+| `fact_location_daily` | Map | one user and day |
+| `etl_runs`, `etl_watermarks` | | bookkeeping |
+
+`etl-service` reads the service databases from a **standby** (`Target Session Attributes=prefer-standby`), only what
+is newer than each table's watermark (minus a 2-minute overlap), and loads it with upserts every `ETL_INTERVAL` (5
+minutes), so a rerun never duplicates a row. Each table is loaded with its watermark in one transaction.
+
+```sh
+curl -s -X POST http://localhost:8095/api/etl/runs -H "Authorization: Bearer <service_jwt>"           # run now
+curl -s http://localhost:8095/api/etl/runs/<run_id> -H "Authorization: Bearer <service_jwt>"          # rows per table
+docker compose exec data-warehouse sh -c 'psql -U "$POSTGRES_USER" tamagotchi_dw'                     # analytics
+```
+
+Example queries:
+
+```sql
+-- Battles per package, and how often the challenger wins
+SELECT p.name AS package, count(*) AS battles, round(100.0 * avg((f.winner_key = f.challenger_key)::int)) AS challenger_wins_percent,
+       round(avg(f.duration_seconds)) AS avg_seconds
+FROM fact_battle f JOIN dim_package p USING (package_key)
+WHERE f.status = 'finished' GROUP BY p.name ORDER BY battles DESC;
+
+-- Global currency created and spent per day and reason
+SELECT d.full_date, c.reason, count(*) AS changes, sum(c.amount) AS global_currency
+FROM fact_currency_change c JOIN dim_date d USING (date_key)
+WHERE c.currency = 'global' GROUP BY d.full_date, c.reason ORDER BY d.full_date, c.reason;
+
+-- Raid damage ranking inside each guild
+SELECT g.name AS guild, u.username, sum(r.damage_dealt) AS damage,
+       rank() OVER (PARTITION BY g.guild_key ORDER BY sum(r.damage_dealt) DESC) AS place
+FROM fact_raid_damage r JOIN dim_guild g USING (guild_key) JOIN dim_user u USING (user_key)
+GROUP BY g.guild_key, g.name, u.username ORDER BY g.name, place;
+```
+
 ### Environment every service now gets
 
 | Variable | Value | Used by |
 | --- | --- | --- |
-| `CACHE_ROUTER_URL` | `http://cache-router:8090` | Gateway and all eight business services; empty disables caching. Guild and Package Registry use it now; other owners can adopt it (`GET`/`PUT`/`DELETE /cache/{key}`, any error = read the database) |
-| `CACHE_TTL_SECONDS`, `CACHE_TIMEOUT_MS` | per service; Guild 60 s / 300 ms, Package Registry 300 s / 300 ms by default | Guild, Package Registry |
-| `DATABASE_URL` (broker) | `postgres://u:p@postgres-0:5432,postgres-1:5432,postgres-2:5432/message_broker?target_session_attrs=read-write` once the database is replicated | Message Broker 1.4.0 |
+| `CACHE_ROUTER_URL` | `http://cache-router:8090` | Gateway and all eight business services; empty disables caching. Guild, Package Registry, Monster Raid and Map use it now; other owners can adopt it (`GET`/`PUT`/`DELETE /cache/{key}`, any error = read the database) |
+| `CACHE_TTL_SECONDS`, `CACHE_TIMEOUT_MS` | per service; Guild 60 s / 300 ms, Package Registry 300 s / 300 ms, Monster Raid and Map 5 s / 300 ms by default | Guild, Package Registry, Monster Raid, Map |
+| `DATABASE_URL` | the multi-host form above | every service and Message Broker 1.4.0 |
+| `CACHE_LOOKUP_TTL_SECONDS`, `DATABASE_FAILOVER_WAIT_SECONDS` | 30 s, 5 s by default | Monster Raid, Map |
 | `BROKER_SAGA_WAIT`, `BROKER_SAGA_STEP_ATTEMPTS`, `BROKER_SAGA_COMPENSATION_ATTEMPTS` | `10s`, `5`, `10` | Message Broker 1.4.0 |
 
-Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**.
+Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**, Map and Monster Raid **2.4.0**, etl-service **1.0.0**.
 

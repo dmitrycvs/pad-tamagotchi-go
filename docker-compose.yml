@@ -1,5 +1,70 @@
 name: tamagotchi-go
 
+# Looking up a stopped container's name takes Docker Desktop's resolver about 4 s; every client of the
+# replicated database gives up after 1 s instead and moves on to the next host.
+x-dns-opt: &dns-opt ["timeout:1", "attempts:1"]
+
+# The C# services and the PostgreSQL nodes only call other containers: with an upstream that refuses at
+# once, the same lookup fails within milliseconds. Not for Alpine images (musl retries a failed lookup)
+# or for containers that call Discord or Firebase.
+x-internal-dns: &internal-dns ["127.0.0.1"]
+
+x-postgres-node: &postgres-node
+  image: postgis/postgis:16-3.4
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  dns: *internal-dns
+  dns_opt: *dns-opt
+  entrypoint: ["bash", "/etc/tamagotchi/replication/node-entrypoint.sh"]
+  # Same settings on every node: a standby needs at least the primary's max_connections and
+  # max_prepared_transactions, and any standby may become the primary.
+  command:
+    - postgres
+    - -c
+    - max_prepared_transactions=64      # PREPARE TRANSACTION (two-phase commit in the battle settlement)
+    - -c
+    - max_connections=200
+    - -c
+    - wal_level=replica
+    - -c
+    - max_wal_senders=10
+    - -c
+    - max_replication_slots=10
+    - -c
+    - hot_standby=on
+    - -c
+    - hot_standby_feedback=on           # the ETL's reads on a standby are not cancelled by vacuum
+    - -c
+    - wal_log_hints=on                  # pg_rewind needs it to rejoin an old primary
+    - -c
+    - wal_keep_size=256MB
+    - -c
+    - max_slot_wal_keep_size=2GB        # a standby that is away cannot fill the primary's disk
+    - -c
+    - recovery_target_timeline=latest   # follow a promoted standby
+    - -c
+    - wal_retrieve_retry_interval=1s
+    - -c
+    - wal_receiver_timeout=5s
+    - -c
+    - wal_sender_timeout=10s
+    - -c
+    - hba_file=/etc/tamagotchi/replication/pg_hba.conf
+  environment:
+    POSTGRES_USER: ${POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    POSTGRES_DB: postgres
+    POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:-${POSTGRES_PASSWORD}}
+    CLUSTER_NODES: postgres-0,postgres-1,postgres-2
+    BOOTSTRAP_NODE: postgres-0
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+    interval: 5s
+    timeout: 5s
+    retries: 10
+    start_period: 120s
+
 services:
   redis:
     image: redis:7.4-alpine
@@ -57,24 +122,70 @@ services:
       retries: 6
       start_period: 10s
 
-  postgres:
-    image: postgis/postgis:16-3.4
-    container_name: tamagotchi-go-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: postgres
+  # Lab 5: PostgreSQL primary and two hot standbys (streaming replication). postgres-0 is the first
+  # primary; after a failover any node can be. Entrypoint and roles: db/replication/node-entrypoint.sh.
+  postgres-0:
+    <<: *postgres-node
+    hostname: postgres-0
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
+      # The volume of the single Lab 1-4 instance, so existing data is kept.
       - postgres-data:/var/lib/postgresql/data
+      - postgres-cluster:/cluster:ro
+      - ./db/replication:/etc/tamagotchi/replication:ro
       - ./db/init:/docker-entrypoint-initdb.d:ro
+
+  postgres-1:
+    <<: *postgres-node
+    hostname: postgres-1
+    ports:
+      - "127.0.0.1:${POSTGRES_1_PORT:-5434}:5432"
+    volumes:
+      - postgres-1-data:/var/lib/postgresql/data
+      - postgres-cluster:/cluster:ro
+      - ./db/replication:/etc/tamagotchi/replication:ro
+
+  postgres-2:
+    <<: *postgres-node
+    hostname: postgres-2
+    ports:
+      - "127.0.0.1:${POSTGRES_2_PORT:-5435}:5432"
+    volumes:
+      - postgres-2-data:/var/lib/postgresql/data
+      - postgres-cluster:/cluster:ro
+      - ./db/replication:/etc/tamagotchi/replication:ro
+
+  # Promotes the most advanced standby when the primary fails three checks in a row (db/failover).
+  # Healthy while some node accepts writes: every service waits for this instead of for one node.
+  postgres-failover:
+    image: postgres:16-alpine
+    init: true
+    restart: unless-stopped
+    dns_opt: *dns-opt
+    entrypoint: ["sh", "/etc/tamagotchi/failover/failover.sh"]
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      CLUSTER_NODES: postgres-0,postgres-1,postgres-2
+      FAILOVER_CHECK_INTERVAL_SECONDS: ${FAILOVER_CHECK_INTERVAL_SECONDS:-2}
+      FAILOVER_FAILURE_THRESHOLD: ${FAILOVER_FAILURE_THRESHOLD:-3}
+      FAILOVER_STARTUP_GRACE_SECONDS: ${FAILOVER_STARTUP_GRACE_SECONDS:-30}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      LOG_DIR: /var/log/tamagotchi
+    volumes:
+      - postgres-cluster:/cluster
+      - ./db/failover:/etc/tamagotchi/failover:ro
+      - tamagotchi-logs:/var/log/tamagotchi
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD", "sh", "/etc/tamagotchi/failover/failover.sh", "check"]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 120s
 
   service-discovery:
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/service-discovery:${TAG_SERVICE_DISCOVERY:-3.6.0}
@@ -156,17 +267,20 @@ services:
     image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns: *internal-dns
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/user_management
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
+      DATABASE_URL: Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=user_management;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Target Session Attributes=primary;Host Recheck Seconds=1;Timeout=3
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       NOTIFICATION_SERVICE_URL: http://message-broker:8070/q/notification-service
@@ -189,17 +303,20 @@ services:
     image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-4.0.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns: *internal-dns
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/battle
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
+      DATABASE_URL: Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=battle;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Target Session Attributes=primary;Host Recheck Seconds=1;Timeout=3
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       TAMAGOTCHI_SERVICE_URL: http://message-broker:8070/q/tamagotchi-service
@@ -228,16 +345,18 @@ services:
     image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/tamagotchi-service:${TAG_TAMAGOTCHI:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
       LOG_DIR: /var/log/tamagotchi
       # Events go to broker topics (tamagotchi.captured) instead of NOTIFICATION_SERVICE_URL.
       MESSAGE_BROKER_URL: http://message-broker:8070
@@ -245,7 +364,7 @@ services:
       # broker over gRPC. Older images ignore both.
       GRPC_PORT: 9000
       BROKER_GRPC_URL: message-broker:9070
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tamagotchi
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-0:5432,postgres-1:5432,postgres-2:5432/tamagotchi?target_session_attrs=read-write
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT_SECONDS:-8}s
@@ -265,20 +384,22 @@ services:
     image: ${DOCKERHUB_USER_DMITRII:-dmitrycvs}/notification-service:${TAG_NOTIFICATION:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
       LOG_DIR: /var/log/tamagotchi
       # gRPC (4.1.0+): Consumer server registered as grpc_port, so topic events arrive over gRPC.
       GRPC_PORT: 9000
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/notification
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-0:5432,postgres-1:5432,postgres-2:5432/notification?target_session_attrs=read-write
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:-}
       # This service reads a Go duration, so the team's seconds value gets an "s".
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT_SECONDS:-8}s
@@ -294,19 +415,22 @@ services:
       replicas: ${REPLICAS_NOTIFICATION:-2}
 
   map-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.3.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-map-service:${TAG_MAP:-2.4.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns: *internal-dns
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
       # JSON log lines in /var/log/tamagotchi/map-service/<instance_id>.log.
       LOG_DIR: /var/log/tamagotchi
       # Consumer server for the broker (registered as grpc_port); peer calls and topic events
@@ -314,7 +438,7 @@ services:
       GRPC_PORT: 9000
       BROKER_GRPC_URL: http://message-broker:9070
       MESSAGE_BROKER_URL: http://message-broker:8070
-      DATABASE_URL: Host=postgres;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      DATABASE_URL: Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=map;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Target Session Attributes=primary;Host Recheck Seconds=1;Timeout=3
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
@@ -333,19 +457,22 @@ services:
       - "8085-8087:8080"
 
   monster-raid-service:
-    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.3.0}
+    image: ${DOCKERHUB_USER_DENIS:-takima}/pad-monster-raid-service:${TAG_MONSTER_RAID:-2.4.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns: *internal-dns
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
     environment:
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
       # JSON log lines in /var/log/tamagotchi/monster-raid-service/<instance_id>.log.
       LOG_DIR: /var/log/tamagotchi
       # Consumer server for the broker (registered as grpc_port); peer calls and topic events
@@ -353,7 +480,7 @@ services:
       GRPC_PORT: 9000
       BROKER_GRPC_URL: http://message-broker:9070
       MESSAGE_BROKER_URL: http://message-broker:8070
-      DATABASE_URL: Host=postgres;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      DATABASE_URL: Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=monster_raid;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Target Session Attributes=primary;Host Recheck Seconds=1;Timeout=3
       JWT_SECRET: ${JWT_SECRET}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
@@ -376,10 +503,11 @@ services:
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/guild-service:${TAG_GUILD:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
@@ -387,10 +515,10 @@ services:
       LOG_DIR: /var/log/tamagotchi
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
       CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
-      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       GUILD_REDIS_CHANNEL: ${GUILD_REDIS_CHANNEL:-tamagotchi:guild:events}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/guild
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-0:5432,postgres-1:5432,postgres-2:5432/guild?target_session_attrs=read-write
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
@@ -413,10 +541,11 @@ services:
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/package-registry-service:${TAG_PACKAGE_REGISTRY:-3.3.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns_opt: *dns-opt
     depends_on:
       message-broker:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
     volumes:
       - tamagotchi-logs:/var/log/tamagotchi
@@ -424,8 +553,8 @@ services:
       LOG_DIR: /var/log/tamagotchi
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
       CIRCUIT_BREAKER_WINDOW_SECONDS: ${CIRCUIT_BREAKER_WINDOW_SECONDS:-}
-      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/package_registry
+      CIRCUIT_BREAKER_COOLDOWN_SECONDS: ${CIRCUIT_BREAKER_COOLDOWN_SECONDS:-5}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-0:5432,postgres-1:5432,postgres-2:5432/package_registry?target_session_attrs=read-write
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-8}
@@ -440,6 +569,58 @@ services:
     deploy:
       replicas: ${REPLICAS_PACKAGE_REGISTRY:-2}
 
+  # Lab 5: the data warehouse, a separate PostgreSQL that is not replicated (it can be rebuilt by the ETL).
+  data-warehouse:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DW_USER:-${POSTGRES_USER}}
+      POSTGRES_PASSWORD: ${DW_PASSWORD:-${POSTGRES_PASSWORD}}
+      POSTGRES_DB: tamagotchi_dw
+    ports:
+      - "127.0.0.1:${DW_PORT:-5433}:5432"
+    volumes:
+      - data-warehouse-data:/var/lib/postgresql/data
+      - ./db/warehouse:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # TCP, because the schema scripts run on a server that listens only on the socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DW_USER:-${POSTGRES_USER}} -d tamagotchi_dw"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Extracts from the service databases (from a standby), transforms into the star schema and loads
+  # tamagotchi_dw every ETL_INTERVAL. Internal: service JWT, not routed by the gateway.
+  etl-service:
+    image: ${DOCKERHUB_USER_DENIS:-takima}/etl-service:${TAG_ETL:-1.0.0}
+    platform: linux/amd64
+    restart: unless-stopped
+    dns: *internal-dns
+    dns_opt: *dns-opt
+    depends_on:
+      postgres-failover:
+        condition: service_healthy
+      data-warehouse:
+        condition: service_healthy
+      log-init:
+        condition: service_completed_successfully
+    volumes:
+      - tamagotchi-logs:/var/log/tamagotchi
+    environment:
+      LOG_DIR: /var/log/tamagotchi
+      SOURCE_DATABASE_URL: Host=postgres-0,postgres-1,postgres-2;Port=5432;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Target Session Attributes=prefer-standby;Host Recheck Seconds=1;Timeout=3
+      WAREHOUSE_DATABASE_URL: Host=data-warehouse;Port=5432;Database=tamagotchi_dw;Username=${DW_USER:-${POSTGRES_USER}};Password=${DW_PASSWORD:-${POSTGRES_PASSWORD}}
+      ETL_INTERVAL: ${ETL_INTERVAL:-5m}
+      ETL_OVERLAP: ${ETL_OVERLAP:-2m}
+      ETL_LOOKBACK: ${ETL_LOOKBACK:-24h}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
+      SERVICE_DISCOVERY_URL: ${SERVICE_DISCOVERY_URL:-http://service-discovery:8761}
+      PORT: 8080
+    # Host port for the demo (POST /api/etl/runs).
+    ports:
+      - "127.0.0.1:${ETL_HOST_PORT:-8095}:8080"
+
   log-init:
     image: busybox:1.37.0
     restart: "no"
@@ -452,10 +633,11 @@ services:
     image: ${DOCKERHUB_USER_MAXIM:-maxkostov}/message-broker:${TAG_MESSAGE_BROKER:-1.4.0}
     platform: linux/amd64
     restart: unless-stopped
+    dns_opt: *dns-opt
     depends_on:
       service-discovery:
         condition: service_healthy
-      postgres:
+      postgres-failover:
         condition: service_healthy
       log-init:
         condition: service_completed_successfully
@@ -466,9 +648,8 @@ services:
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET}
       GATEWAY_SHARED_SECRET: ${GATEWAY_SHARED_SECRET:?Set GATEWAY_SHARED_SECRET in .env}
       # Lab 4 step 4: durable queues and the dead letter channel (broker 1.3.0+; older images ignore these).
-      # Broker 1.4.0 also takes a host list for a replicated database (README, Lab 5):
-      # postgres://u:p@postgres-0:5432,postgres-1:5432,postgres-2:5432/message_broker?target_session_attrs=read-write
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/message_broker
+      # Broker 1.4.0 takes a host list and follows the primary after a failover (README, Lab 5).
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-0:5432,postgres-1:5432,postgres-2:5432/message_broker?target_session_attrs=read-write
       # Lab 5 saga transactions (broker 1.4.0): POST /api/transactions; the saga log is in the same database.
       BROKER_SAGA_WAIT: ${BROKER_SAGA_WAIT:-10s}
       BROKER_SAGA_STEP_ATTEMPTS: ${BROKER_SAGA_STEP_ATTEMPTS:-5}
@@ -488,7 +669,9 @@ services:
       DISCOVERY_HEARTBEAT_INTERVAL: ${DISCOVERY_HEARTBEAT_INTERVAL:-10s}
       CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-3}
       CIRCUIT_BREAKER_WINDOW: ${CIRCUIT_BREAKER_WINDOW:-}
-      CIRCUIT_BREAKER_COOLDOWN: ${CIRCUIT_BREAKER_COOLDOWN:-}
+      # A database failover fails every replica for a few seconds and opens their breakers; a short
+      # cooldown probes them again as soon as the new primary is up (default would be the 35 s window).
+      CIRCUIT_BREAKER_COOLDOWN: ${CIRCUIT_BREAKER_COOLDOWN:-5s}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_MIN_INTERVAL: ${DISCORD_MIN_INTERVAL:-5s}
       DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-3s}
@@ -579,7 +762,13 @@ services:
       - grafana-data:/var/lib/grafana
 
 volumes:
+  # postgres-0 (the volume of the single instance before Lab 5)
   postgres-data:
+  postgres-1-data:
+  postgres-2-data:
+  # Name of the current primary, written by postgres-failover
+  postgres-cluster:
+  data-warehouse-data:
   tamagotchi-logs:
   prometheus-data:
   loki-data:

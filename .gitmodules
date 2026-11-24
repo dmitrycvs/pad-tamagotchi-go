@@ -36,3 +36,6 @@
 [submodule "cache-router"]
 	path = cache-router
 	url = https://github.com/MaxKostov/cache-router.git
+[submodule "etl-service"]
+	path = etl-service
+	url = https://github.com/aXeeDENt/etl-service.git

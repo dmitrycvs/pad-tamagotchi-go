@@ -1620,6 +1620,7 @@ Any endpoint can additionally return the errors below. Each carries the header `
 | Status | `error`                                                                                          | When                                   |
 | ------ | -------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | 401    | `Missing or malformed Authorization header.` / `Invalid or expired token.`                     | token missing, badly signed or expired |
+| 401    | `Token has been revoked.`                                                                        | the token was logged out (Lab 5): `auth:revoked:{jti}` exists on the cache-router |
 | 403    | `This endpoint is restricted to internal services.` / `This endpoint requires the admin role.` | wrong token kind or role               |
 | 404    | `No service handles this path.`                                                                  | unknown path                           |
 | 503    | `Gateway is at its concurrent request limit. Retry shortly.` (with `Retry-After: 1`)           | concurrent task limit reached          |
@@ -1805,7 +1806,8 @@ volumes `postgres-data` (the volume of the single instance before Lab 5, so its 
 
 **Upgrading from Lab 4:** run `docker compose down` (without `-v`) on the old version first. The old `postgres`
 container uses the volume that `postgres-0` takes over. Then update the `TAG_*` values in `.env`: Map and Monster
-Raid need 2.4.0 or newer.
+Raid need 2.4.0 or newer, User Management 5.0.0, Battle 5.0.1 and the gateway 5.0.0. The data warehouse publishes
+host port 5433, so `POSTGRES_PORT` must not be 5433.
 
 ### Service Images
 
@@ -1817,9 +1819,9 @@ matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
-| **API Gateway** | `dmitrycvs/api-gateway:3.3.0`               | **8080** |
-| User Management       | `filipel2004/user-management-service:4.0.0` | —              |
-| Battle                | `filipel2004/battle-service:4.0.0`          | 8082–8084      |
+| **API Gateway** | `dmitrycvs/api-gateway:5.0.0`               | **8080** |
+| User Management       | `filipel2004/user-management-service:5.0.0` | —              |
+| Battle                | `filipel2004/battle-service:5.0.1`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:4.1.0`        | —              |
 | Notification          | `dmitrycvs/notification-service:4.1.0`      | —              |
 | Map                   | `takima/pad-map-service:2.4.0`              | 8085–8087      |
@@ -2434,18 +2436,26 @@ fire their notification topics and speak gRPC with the broker (`BROKER_GRPC_URL`
 
 ## Lab 5: Sharding and Replication
 
-Steps 1 (Maxim: the contracts the rest of the lab builds on) and 2 (Denis: replication, warehouse, ETL) of the Lab 5 Work Queue. Tracking issue:
+The four steps of the Lab 5 Work Queue: Maxim (the broker on a replicated database, the saga coordinator,
+cache-router), Denis (replication, warehouse, ETL), Filip (auth data cache, two-phase commit, then the saga) and
+Dmitrii (gateway auth cache and logout, architecture diagram, final check, release). Tracking issue:
 [#70](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/70).
+
+**Check it all at once:** start the stack, then run
+[postman/lab5-final.postman_collection.json](./postman/lab5-final.postman_collection.json)
+(44 requests, 45 assertions, one folder per grade; [guide](./postman/README.md#lab-5-final-check)).
 
 | Grade | Requirement | Where |
 | --- | --- | --- |
+| 2 | Previously forgotten components on the architecture diagram | [Architecture Diagram](#architecture-diagram): Firebase Cloud Messaging, PostGIS, the guild chat Redis, monitoring and Discord alerts |
+| 3 | Data Warehouse, ETL and Cache on the diagram | [Architecture Diagram](#architecture-diagram): `data-warehouse`, `etl-service`, `cache-router` with `redis-cache-1..3`, plus the replicated PostgreSQL and the saga coordinator |
 | 4 | Data warehouse and ETL | [Data warehouse and ETL](#data-warehouse-and-etl), [12. ETL Service](#12-etl-service) |
 | 5 | Replication + failover | [Database replication and failover](#database-replication-and-failover); broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
-| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; User Management caches the login lookup (`auth:user:{email}`), profiles and relationship lookups and stores logout revocations (`auth:revoked:{jti}`), Battle caches battle state and its stat-definition lookups, Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
-| 8 | Two-phase commit for a change across two databases | [Battle settlement: two-phase commit](#battle-settlement-two-phase-commit-grade-8): Battle coordinated, User Management participated (release 4.1.0, tag `lab5-2pc`); replaced by the saga |
+| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; the gateway caches verified tokens (`auth:token:{sha256}`) and rejects logged-out ones (`auth:revoked:{jti}`, 401 `Token has been revoked.`), User Management caches the login lookup (`auth:user:{email}`), profiles and relationship lookups and stores logout revocations (`auth:revoked:{jti}`), Battle caches battle state and its stat-definition lookups, Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
 | 7 | Consistent hashing research; cache sharded with it | [docs/consistent-hashing.md](./cache-router/docs/consistent-hashing.md) (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots); `GET /ring/simulate` |
+| 8 | Two-phase commit for a change across two databases | [Battle settlement: two-phase commit](#battle-settlement-two-phase-commit-grade-8): Battle coordinated, User Management participated (release 4.1.0, tag `lab5-2pc`); replaced by the saga |
 | 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions); the battle settlement is that saga: [Battle settlement: saga](#battle-settlement-saga-grade-9) (Battle 5.0.1, User Management 5.0.0) |
-| 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), [12. ETL Service](#12-etl-service), `X-Cache` on the cached Guild, Package Registry, Monster Raid and Map reads |
+| 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), [12. ETL Service](#12-etl-service), `X-Cache` on the cached Guild, Package Registry, Monster Raid and Map reads; [lab5-final](./postman/lab5-final.postman_collection.json) Postman collection; every image released on DockerHub and pinned in Compose ([Service Images](#service-images)) |
 
 ### Cache sharding
 

@@ -48,58 +48,95 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 ## Architecture Diagram
 
+The final Lab 5 system. `×2` marks a service that runs two replicas; the two black dots are the broker's
+connection to every business service.
+
 ```mermaid
 flowchart TB
-    Clients["Clients / Postman"]
+    Actor(["Client / Postman"])
+    Gateway["API Gateway :8080<br/>JWT check, token cache, revoked tokens"]
+    Discovery["Service Discovery :8761"]
+    Discord[/"Discord alerts"/]
+    Broker["Message Broker :8070 / gRPC :9070<br/>queues, topics, dead letters, saga coordinator"]
 
-    Gateway["API Gateway :8080<br/>JWT, internal routes 404,<br/>admin log download"]
+    Actor --> Gateway
+    Gateway --> Discovery
+    Discovery --> Discord
+    Gateway --> Broker
+    Discovery --> Broker
+    Broker -.-> Discord
 
-    subgraph BrokerBox["Message Broker :8070 HTTP / :9070 gRPC"]
-        Queues["Request queues /q/{service}<br/>subscriber-based"]
-        Topics["Topic queues<br/>/api/topics/{topic}/events"]
-        Routing["Least-load balancer<br/>circuit breaker + reroute"]
-        DLC["Dead letter channel<br/>/api/dead-letters"]
-    end
-
-    BrokerDB[("PostgreSQL message_broker<br/>durable messages")]
-
-    Services["Eight business services, two replicas each<br/>User Management, Battle, Tamagotchi, Notification,<br/>Map, Monster Raid, Guild, Package Registry<br/>gRPC Consumer :9000"]
-
-    Discord["Discord alerts"]
-    Discovery["Service Discovery :8761<br/>instances, topics, grpc_port, load"]
-    ServiceDBs[("Separate PostgreSQL databases")]
-    Redis[("Redis<br/>guild events")]
-
-    subgraph Monitoring
+    subgraph Monitoring["Monitoring"]
         Prometheus["Prometheus :9090"]
-        Logs["Shared volume<br/>/var/log/tamagotchi"]
-        Alloy --> Loki
+        Loki["Alloy + Loki<br/>logs"]
         Grafana["Grafana :3000"]
+        Grafana --> Prometheus & Loki
     end
+    Prometheus -.->|"scrape /metrics"| Broker
 
-    Clients -->|"REST + JWT"| Gateway
-    Gateway -->|"HTTP, trusted identity"| Queues
-    Clients <-.->|"WebSocket / SignalR after negotiation"| Services
-    Queues --> Routing
-    Topics --> Routing
-    Routing -->|"gRPC Consumer.Handle / Deliver :9000<br/>HTTP fallback"| Services
-    Services -->|"gRPC Broker.Call / Broker.Publish"| BrokerBox
-    BrokerBox --> BrokerDB
-    Routing -->|"after 5 failed attempts"| DLC
-    Services -.->|"register + heartbeat"| Discovery
-    Discovery -.->|"health and load polls"| Services
-    BrokerBox -.->|"instance cache, 5 s"| Discovery
-    Gateway -.->|"realtime instance cache"| Discovery
-    Services --> ServiceDBs
-    Services <-->|"Guild chat"| Redis
-    Prometheus -.->|"HTTP SD via broker"| BrokerBox
-    Prometheus -->|"scrape /metrics"| Services
-    Gateway & BrokerBox & Services -->|"JSON logs"| Logs
-    Logs --> Alloy
-    Logs -->|"zip download"| Gateway
-    BrokerBox & Discovery -.-> Discord
-    Grafana --> Prometheus
-    Grafana --> Loki
+    subgraph Cache["Cache (all services)"]
+        Router["cache-router :8090<br/>consistent hash ring"]
+        R1[("redis-cache-1")]
+        R2[("redis-cache-2")]
+        R3[("redis-cache-3")]
+        Router --> R1 & R2 & R3
+    end
+    Gateway -.->|"auth data"| Router
+
+    Bus1(( )):::bus
+    Bus2(( )):::bus
+    Broker <--> Bus1
+    Bus1 <-----> Bus2
+
+    UM["User Management ×2"]
+    Battle["Battle ×2"]
+    Tama["Tamagotchi ×2"]
+    Notif["Notification ×2"]
+    UMDB[("user_management")]
+    BattleDB[("battle")]
+    TamaDB[("tamagotchi")]
+    NotifDB[("notification")]
+    Bus1 --> UM & Battle & Tama & Notif
+    UM --> UMDB
+    Battle --> BattleDB
+    Tama --> TamaDB
+    Notif --> NotifDB
+
+    Map["Map ×2"]
+    Raid["Monster Raid ×2"]
+    Guild["Guild ×2"]
+    Registry["Package Registry ×2"]
+    MapDB[("map + PostGIS")]
+    RaidDB[("monster_raid")]
+    GuildDB[("guild")]
+    RegistryDB[("package_registry")]
+    Bus2 --> Map & Raid & Guild & Registry
+    Map --> MapDB
+    Raid --> RaidDB
+    Guild --> GuildDB
+    Registry --> RegistryDB
+
+    Notif --> FCM[/"Firebase Cloud Messaging"/]
+    Guild <--> Redis[("redis: guild chat")]
+
+    subgraph Postgres["Replicated PostgreSQL, holds every DB"]
+        P0[("postgres-0 primary")]
+        P1[("postgres-1 standby")]
+        P2[("postgres-2 standby")]
+        Failover["postgres-failover"]
+        P0 -->|"streaming"| P1 & P2
+        Failover -.->|"promotes a standby"| P1 & P2
+    end
+    RegistryDB ~~~ P0
+
+    subgraph Analytics["Analytics"]
+        ETL["etl-service :8095"]
+        DW[("data-warehouse")]
+        ETL --> DW
+    end
+    P1 & P2 -->|"read"| ETL
+
+    classDef bus fill:#333,stroke:#333,color:#333
 ```
 
 **How a request travels (Lab 4).** A client calls the API Gateway with a JWT. The gateway checks it,
@@ -125,11 +162,27 @@ and scrapes its `/metrics`. Every service writes JSON log lines to the shared `/
 volume; Alloy ships them to Loki, and admins download them as a zip through the gateway. Grafana
 shows both. The broker and Service Discovery send Discord alerts.
 
+**Cache (Lab 5).** The gateway and every business service read through `cache-router`, which places each
+key on one of `redis-cache-1..3` with a consistent hash ring (150 virtual nodes per shard). The gateway caches
+verified tokens and checks logged-out ones (`auth:revoked:{jti}`); the services cache their common GETs and
+evict on write. A shard that is down is a miss: everything falls back to its database.
+
+**Data (Lab 5).** Every service database and the broker's `message_broker` live on one PostgreSQL cluster:
+`postgres-0` is the first primary, `postgres-1` and `postgres-2` stream from it, and `postgres-failover`
+promotes the most up-to-date standby when the primary stops answering. Services connect with multi-host
+connection strings, so they follow the new primary without a restart. `etl-service` reads the standbys and
+loads the `data-warehouse` star schema every 5 minutes.
+
+**Battle settlement (Lab 5).** When a battle ends, Battle starts one saga on the broker's coordinator
+(`POST /api/transactions`): settlement, both currency changes, four XP awards and the capture. If a step fails,
+the broker runs the compensations of the finished steps in reverse order. Before the saga, the same settlement
+was a two-phase commit coordinated by Battle (tag `lab5-2pc`).
+
 **How the services communicate:**
 
 - **API Gateway** accepts external client REST, validates JWTs and relays trusted identity to the broker. It negotiates direct realtime sockets and serves the admin log download. **Message Broker** owns request queues, topic queues, durable delivery, the dead letter channel, least-load instance selection and the Lab 3 circuit breaker.
 - **Notification Service** is the delivery boundary. It subscribes to the six notification topics (`user.friend_request_received`, `battle.request_received`, `tamagotchi.captured`, `map.nearby_player_detected`, `raid.started`, `guild.invitation_sent`), and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
-- **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle credits global currency and XP through it, and Package Registry grants moderator/admin roles through it.
+- **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle's settlement saga credits global currency through it, and Package Registry grants moderator/admin roles through it.
 - **Package Registry Service** is the configuration authority — Battle and Monster Raid read stat-interpretation rules from it before computing damage, and it supplies the stat definitions used when a new Tamagotchi is created.
 - **Monster Raid Service** asks Guild Service *"is this player a member of the guild this raid is bound to?"* before admitting anyone to the boss clicker, and exchanges monster definitions with Package Registry in both directions.
 

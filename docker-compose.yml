@@ -264,7 +264,7 @@ services:
       start_period: 150s
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-4.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
     dns: *internal-dns
@@ -300,7 +300,7 @@ services:
       replicas: ${REPLICAS_USER_MANAGEMENT:-2}
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-4.0.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-4.1.0}
     platform: linux/amd64
     restart: unless-stopped
     dns: *internal-dns

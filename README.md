@@ -305,6 +305,29 @@ Success (200 OK):
 }
 ```
 
+The JWT carries `sub`, `jti` (unique per token, since User Management 4.1.0), `package_id`, `roles` and `exp`. The
+lookup login needs is cached as `auth:user:{email}` for 5 minutes (Lab 5).
+
+#### Logout
+
+`POST /api/auth/logout` (User Management 4.1.0)
+Headers: `Authorization: Bearer <jwt>`. No body.
+
+Revokes this token until it expires: User Management stores `auth:revoked:{jti}` on the cache-router with TTL = the
+token's remaining lifetime, and the gateway rejects a token whose `jti` is revoked. User Management reads the token id
+from a forwarded `Authorization` header (verified with `JWT_SECRET`, must be the caller's) or from the gateway headers
+`X-Token-Id` (the `jti`) and `X-Token-Expires` (the `exp`, Unix seconds).
+
+Success (200 OK):
+
+```json
+{ "revoked": true, "jti": "6f1c2a9e0b7d4d0e9a523c1f5e7b8a10", "expires_at": "2026-11-25T15:37:07+00:00", "already_expired": false }
+```
+
+Errors: **400** the token id is missing or invalid, or the token is someone else's; **401** no identity; **403**
+`Logout needs a user token.` (a service caller); **503** `Logout unavailable: the token could not be revoked. Retry
+shortly.` with `Retry-After: 1` when the cache did not store it (logout never pretends to succeed).
+
 #### Get User Profile
 
 `GET /api/users/{user_id}`
@@ -419,6 +442,21 @@ Error (409 Conflict):
 
 ```json
 { "error": "Insufficient global currency." }
+```
+
+#### Two-Phase Commit Participant (internal, Lab 5 Grade 8)
+
+User Management 4.1.0 takes part in the battle settlement's two-phase commit; Battle Service coordinates. Only the
+`battle-service` caller, through the broker. `tx_id` is 1–150 letters, digits, `.`, `_`, `-`.
+
+| Method | Path | Body | Success | Errors |
+| --- | --- | --- | --- | --- |
+| POST | `/api/tx/{tx_id}/prepare` | the Adjust Currency body plus `user_id`: `{ "user_id", "currency": "global", "amount", "event_id", "reason" }` | 200 vote yes: the change ran in a transaction ended with `PREPARE TRANSACTION '{tx_id}:user-management-service'` | 409 `Insufficient global currency.`, 404 `User not found.` (vote no), 400, 401, 403 |
+| POST | `/api/tx/{tx_id}/commit` | | 200 `committed` / `already_committed` (`COMMIT PREPARED`) | 404 `not_prepared` |
+| POST | `/api/tx/{tx_id}/abort` | | 200 `aborted` / `nothing_to_abort` (`ROLLBACK PREPARED`) | 409 `already_committed` |
+
+```json
+{ "tx_id": "settle-<battle_id>", "participant": "user-management-service", "phase": "prepare", "vote": "yes", "outcome": "prepared", "balance": 1370, "error": null }
 ```
 
 ---
@@ -539,9 +577,15 @@ Success (200 OK):
   "stat_bonus": 1.1,
   "opponent_hp": 98,
   "next_turn": "user-uuid-456",
-  "battle_over": false
+  "battle_over": false,
+  "settlement_status": null
 }
 ```
+
+On the last turn (`battle_over: true`) the battle is saved as `settling` and settled at once; `settlement_status` is
+then `committed`, `pending` (committed, phase 2 or a follow-up call still retried) or `aborted` (Battle 4.1.0: [two-phase
+commit](#battle-settlement-two-phase-commit-grade-8)). `GET /api/battles/{battle_id}` and the result carry the same
+field; a forfeit whose settlement was aborted answers `409 { "error": "The battle could not be settled.", "settlement_status": "aborted" }`.
 
 Error (409 Conflict):
 
@@ -570,6 +614,7 @@ Headers: `Authorization: Bearer <jwt>`
       "xp": { "primary": 24, "secondary": 16 }
     }
   },
+  "settlement_status": "committed",
   "finished_at": "2026-09-09T12:11:30Z"
 }
 ```
@@ -2384,7 +2429,8 @@ Steps 1 (Maxim: the contracts the rest of the lab builds on) and 2 (Denis: repli
 | --- | --- | --- |
 | 4 | Data warehouse and ETL | [Data warehouse and ETL](#data-warehouse-and-etl), [12. ETL Service](#12-etl-service) |
 | 5 | Replication + failover | [Database replication and failover](#database-replication-and-failover); broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
-| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
+| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; User Management caches the login lookup (`auth:user:{email}`), profiles and relationship lookups and stores logout revocations (`auth:revoked:{jti}`), Battle caches battle state and its stat-definition lookups, Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
+| 8 | Two-phase commit for a change across two databases | [Battle settlement: two-phase commit](#battle-settlement-two-phase-commit-grade-8): Battle coordinates, User Management participates; tag `lab5-2pc` |
 | 7 | Consistent hashing research; cache sharded with it | [docs/consistent-hashing.md](./cache-router/docs/consistent-hashing.md) (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots); `GET /ring/simulate` |
 | 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions), battle settlement saga for Filip |
 | 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), [12. ETL Service](#12-etl-service), `X-Cache` on the cached Guild, Package Registry, Monster Raid and Map reads |
@@ -2515,6 +2561,36 @@ FROM fact_raid_damage r JOIN dim_guild g USING (guild_key) JOIN dim_user u USING
 GROUP BY g.guild_key, g.name, u.username ORDER BY g.name, place;
 ```
 
+### Battle settlement: two-phase commit (Grade 8)
+
+Step 3 (Filip). When a battle ends, Battle Service settles it as a **two-phase commit** across two databases: `battle`
+(the settlement record: the battle becomes `finished`, plus a `battle_settlements` row) and `user_management` (the
+winner's +120). `tx_id = settle-{battle_id}`.
+
+1. Battle prepares its own part: `BEGIN` ... `PREPARE TRANSACTION 'settle-{id}:battle-service'`.
+2. It asks User Management to prepare (`POST /api/tx/{tx_id}/prepare` through the broker), which ends with
+   `PREPARE TRANSACTION 'settle-{id}:user-management-service'`. 200 is a yes vote; 409, 404 or no answer is a no.
+3. Battle writes the decision (`commit` only if both voted yes) to `tx_decisions`, committed on its own.
+4. `COMMIT PREPARED` / `ROLLBACK PREPARED` on both sides (`/api/tx/{tx_id}/commit|abort` for User Management).
+5. A recovery loop finishes every pending decision at startup and every 30 s, and presumes abort for a prepared
+   transaction without a decision. The loser's penalty, the XP and the capture stay separate idempotent calls after the
+   commit (this round).
+
+Every node has `max_prepared_transactions=64`; a prepared transaction is replicated, so it survives a failover. The
+currency change still writes `IdempotencyRecords` with `event_id battle:{battle_id}:winner`, so the ETL is unchanged.
+
+**Proof** ([postman/lab5-2pc-e2e.md](./postman/lab5-2pc-e2e.md): requests, answers and both services' logs of a commit,
+an abort, and a prepared transaction committed on the new primary after `docker compose stop` of the old one):
+
+| | User Management | Battle |
+| --- | --- | --- |
+| PRs | [#17 participant](https://github.com/filipel2004/user-management-service/pull/17), [#18 token subject](https://github.com/filipel2004/user-management-service/pull/18) | [#18 coordinator](https://github.com/filipel2004/battle-service/pull/18), [#19 token subject](https://github.com/filipel2004/battle-service/pull/19) |
+| Tag | [`lab5-2pc`](https://github.com/filipel2004/user-management-service/tree/lab5-2pc) | [`lab5-2pc`](https://github.com/filipel2004/battle-service/tree/lab5-2pc) |
+| Image | `filipel2004/user-management-service:4.1.0` | `filipel2004/battle-service:4.1.0` |
+
+The CPR commit that pins these images is tagged `lab5-2pc` too. The two-phase commit is replaced by the broker saga in
+the next round (Grade 9); the tags keep the 2PC version.
+
 ### Environment every service now gets
 
 | Variable | Value | Used by |
@@ -2525,5 +2601,5 @@ GROUP BY g.guild_key, g.name, u.username ORDER BY g.name, place;
 | `CACHE_LOOKUP_TTL_SECONDS`, `DATABASE_FAILOVER_WAIT_SECONDS` | 30 s, 5 s by default | Monster Raid, Map |
 | `BROKER_SAGA_WAIT`, `BROKER_SAGA_STEP_ATTEMPTS`, `BROKER_SAGA_COMPENSATION_ATTEMPTS` | `10s`, `5`, `10` | Message Broker 1.4.0 |
 
-Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**, Map and Monster Raid **2.4.0**, etl-service **1.0.0**.
+Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**, Map and Monster Raid **2.4.0**, etl-service **1.0.0**, User Management and Battle **4.1.0**.
 

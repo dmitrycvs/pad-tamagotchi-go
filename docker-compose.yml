@@ -17,12 +17,11 @@ x-postgres-node: &postgres-node
   dns: *internal-dns
   dns_opt: *dns-opt
   entrypoint: ["bash", "/etc/tamagotchi/replication/node-entrypoint.sh"]
-  # Same settings on every node: a standby needs at least the primary's max_connections and
-  # max_prepared_transactions, and any standby may become the primary.
+  # Same settings on every node: a standby needs at least the primary's max_connections, and any
+  # standby may become the primary. (max_prepared_transactions is back to its default, 0: the battle
+  # settlement runs as a saga on the broker since Battle 5.0.0, no service uses PREPARE TRANSACTION.)
   command:
     - postgres
-    - -c
-    - max_prepared_transactions=64      # PREPARE TRANSACTION (two-phase commit in the battle settlement)
     - -c
     - max_connections=200
     - -c
@@ -264,7 +263,7 @@ services:
       start_period: 150s
 
   user-management-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-4.1.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/user-management-service:${TAG_USER_MANAGEMENT:-5.0.0}
     platform: linux/amd64
     restart: unless-stopped
     dns: *internal-dns
@@ -300,7 +299,7 @@ services:
       replicas: ${REPLICAS_USER_MANAGEMENT:-2}
 
   battle-service:
-    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-4.1.0}
+    image: ${DOCKERHUB_USER_FILIP:-filipel2004}/battle-service:${TAG_BATTLE:-5.0.1}
     platform: linux/amd64
     restart: unless-stopped
     dns: *internal-dns

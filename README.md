@@ -444,10 +444,11 @@ Error (409 Conflict):
 { "error": "Insufficient global currency." }
 ```
 
-#### Two-Phase Commit Participant (internal, Lab 5 Grade 8)
+#### Two-Phase Commit Participant (removed in 5.0.0)
 
-User Management 4.1.0 takes part in the battle settlement's two-phase commit; Battle Service coordinates. Only the
-`battle-service` caller, through the broker. `tx_id` is 1–150 letters, digits, `.`, `_`, `-`.
+User Management **4.1.0** (tag `lab5-2pc`) took part in the battle settlement's two-phase commit, Battle Service
+coordinating, through the routes below. Since 5.0.0 the settlement is a saga on the broker that uses Adjust Currency
+(with negative amounts as compensations), and these routes answer 404. Kept here as the Grade 8 record.
 
 | Method | Path | Body | Success | Errors |
 | --- | --- | --- | --- | --- |
@@ -582,10 +583,21 @@ Success (200 OK):
 }
 ```
 
-On the last turn (`battle_over: true`) the battle is saved as `settling` and settled at once; `settlement_status` is
-then `committed`, `pending` (committed, phase 2 or a follow-up call still retried) or `aborted` (Battle 4.1.0: [two-phase
-commit](#battle-settlement-two-phase-commit-grade-8)). `GET /api/battles/{battle_id}` and the result carry the same
-field; a forfeit whose settlement was aborted answers `409 { "error": "The battle could not be settled.", "settlement_status": "aborted" }`.
+On the last turn (`battle_over: true`) the battle is saved as `settling` and settled at once by a saga on the broker
+([Battle settlement: saga](#battle-settlement-saga-grade-9)); `settlement_status` is then `completed`, `compensated`
+(a step failed and the completed ones were undone), `failed` (an undo kept failing) or `running` (still running after
+6 s; Battle follows it). `GET /api/battles/{battle_id}` and the result carry the same field. A forfeit answers 200 with
+the result, **202** `{ battle_id, status, settlement_status: "running" }` while the saga runs, or
+`409 { "error": "The battle could not be settled.", "settlement_status": "compensated" }`.
+
+#### Settlement Saga Steps (internal, Battle 5.0.0)
+
+Called by the Message Broker while it runs the battle's settlement saga (service identity only). Both are idempotent.
+
+| Method | Path | Body | Success | Errors |
+| --- | --- | --- | --- | --- |
+| POST | `/api/battles/{battle_id}/settlement` | `{ "event_id": "battle-{id}-settle" }` | 200 `{ battle_id, status: "finished", winner_id, loser_id, finished_at, outcome: "settled" \| "already_settled" }` | 400 no `event_id`, 401, 403 a user, 404, 409 `Battle is not waiting for its settlement.` / `The settlement of this battle was cancelled.` |
+| POST | `/api/battles/{battle_id}/settlement/cancel` | `{ "event_id": "battle-{id}-settle-cancel" }` | 200 `{ battle_id, status: "settling", settlement_status: "compensated", outcome: "cancelled" \| "cancelled_before_settlement" \| "nothing_to_undo" }` | 400, 401, 403, 404 |
 
 Error (409 Conflict):
 
@@ -614,7 +626,7 @@ Headers: `Authorization: Bearer <jwt>`
       "xp": { "primary": 24, "secondary": 16 }
     }
   },
-  "settlement_status": "committed",
+  "settlement_status": "completed",
   "finished_at": "2026-09-09T12:11:30Z"
 }
 ```
@@ -2430,9 +2442,9 @@ Steps 1 (Maxim: the contracts the rest of the lab builds on) and 2 (Denis: repli
 | 4 | Data warehouse and ETL | [Data warehouse and ETL](#data-warehouse-and-etl), [12. ETL Service](#12-etl-service) |
 | 5 | Replication + failover | [Database replication and failover](#database-replication-and-failover); broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
 | 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; User Management caches the login lookup (`auth:user:{email}`), profiles and relationship lookups and stores logout revocations (`auth:revoked:{jti}`), Battle caches battle state and its stat-definition lookups, Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
-| 8 | Two-phase commit for a change across two databases | [Battle settlement: two-phase commit](#battle-settlement-two-phase-commit-grade-8): Battle coordinates, User Management participates; tag `lab5-2pc` |
+| 8 | Two-phase commit for a change across two databases | [Battle settlement: two-phase commit](#battle-settlement-two-phase-commit-grade-8): Battle coordinated, User Management participated (release 4.1.0, tag `lab5-2pc`); replaced by the saga |
 | 7 | Consistent hashing research; cache sharded with it | [docs/consistent-hashing.md](./cache-router/docs/consistent-hashing.md) (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots); `GET /ring/simulate` |
-| 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions), battle settlement saga for Filip |
+| 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions); the battle settlement is that saga: [Battle settlement: saga](#battle-settlement-saga-grade-9) (Battle 5.0.1, User Management 5.0.0) |
 | 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), [12. ETL Service](#12-etl-service), `X-Cache` on the cached Guild, Package Registry, Monster Raid and Map reads |
 
 ### Cache sharding
@@ -2457,8 +2469,7 @@ ring. The spread of a shard's share is about 1/√150 ≈ 8% (1σ), so ±10% is 
 ### Database replication and failover
 
 `postgres-0` (the first primary), `postgres-1` and `postgres-2` run `postgis/postgis:16-3.4` with streaming
-replication, one replication slot per standby and the same settings, including
-`max_prepared_transactions=64` for two-phase commit. Replication is asynchronous: a commit the primary
+replication, one replication slot per standby and the same settings. Replication is asynchronous: a commit the primary
 acknowledged in the last moment before it died may be missing on the promoted standby.
 
 | Part | What it does |
@@ -2561,9 +2572,49 @@ FROM fact_raid_damage r JOIN dim_guild g USING (guild_key) JOIN dim_user u USING
 GROUP BY g.guild_key, g.name, u.username ORDER BY g.name, place;
 ```
 
+### Battle settlement: saga (Grade 9)
+
+Step 3 (Filip). Since Battle 5.0.0 a finished battle is settled by **one saga on the Message Broker's coordinator**:
+`POST http://message-broker:8070/api/transactions?wait=6` with Battle's service JWT, `tx_id = settle-{battle_id}`. The
+broker runs the steps in order and, when one fails, the compensations of the completed ones, newest first. Every step
+and every compensation has its own `event_id`.
+
+| # | Step | Compensation |
+| --- | --- | --- |
+| 1 | Battle `POST /api/battles/{id}/settlement` (`battle-{id}-settle`): the battle becomes `finished` | `POST .../settlement/cancel` (`battle-{id}-settle-cancel`) |
+| 2 | User Management `POST /api/users/{winner}/currency` +120 (`battle-{id}-reward`) | −120 (`battle-{id}-reward-undo`) |
+| 3 | User Management `POST /api/users/{loser}/currency` −60 (`battle-{id}-penalty`); a **409 Insufficient global currency** fails the step | +60 (`battle-{id}-penalty-undo`) |
+| 4–7 | Tamagotchi `POST /api/tamagotchis/{id}/xp`: winner 60 / 40, loser 24 / 16 (`battle-{id}-xp-winner-primary` ...) | the negative amount (`...-undo`) |
+| 8 | Tamagotchi `POST /api/tamagotchis/{loser_primary}/transfer` (the capture, last) | the transfer back with `make_primary: true` |
+
+This replaces the separate currency and XP calls. `settlement_status` follows the saga (`completed`, `compensated`,
+`failed`, `running`); a saga still running after the wait is followed by Battle's poller every 5 s. The ETL reads the
+currency reasons from the new event ids (`-reward`, `-penalty`, `-undo`).
+
+**Trigger it** (Postman or curl; through the gateway with the two players' JWTs): create a battle, accept it, then
+`POST /api/battles/{id}/forfeit` as one player.
+- **Completed:** both players have currency (the loser at least 60). The forfeit answers 200 with
+  `settlement_status: completed`; `GET http://localhost:8070/api/transactions/settle-{id}` (service JWT) shows the 8
+  completed steps.
+- **Compensated on a 409:** the loser has less than 60. Step 3 is rejected with 409, steps 2 and 1 are undone; the
+  forfeit answers 409 `compensated`, and the winner's balance is unchanged.
+- **Compensated at the XP step:** `docker compose stop tamagotchi-service` after accepting the battle. Step 4 fails
+  after its 5 attempts (about 15 s), and steps 3, 2 and 1 are undone. The forfeit answers 200 or 202 `running`, and
+  `GET /api/battles/{id}` shows `compensated` once the poller has seen it.
+
+**Proof**: [postman/lab5-saga-e2e.md](./postman/lab5-saga-e2e.md), the three cases above run on the released images
+(broker 1.4.0), with the broker's saga log. PRs: [User Management #20](https://github.com/filipel2004/user-management-service/pull/20),
+[Battle #21](https://github.com/filipel2004/battle-service/pull/21) and [#23](https://github.com/filipel2004/battle-service/pull/23).
+
+`max_prepared_transactions` is back to its default (0) on `postgres-0..2`. Upgrading a stack that ran the 2PC version:
+`SELECT gid FROM pg_prepared_xacts` on the primary must be empty (resolve any row with `COMMIT PREPARED` or
+`ROLLBACK PREPARED`; Battle and User Management also log them at startup), then `docker compose up -d` recreates the
+three nodes together.
+
 ### Battle settlement: two-phase commit (Grade 8)
 
-Step 3 (Filip). When a battle ends, Battle Service settles it as a **two-phase commit** across two databases: `battle`
+Step 3 (Filip), first round, **replaced by the saga above**; kept as the Grade 8 record (release 4.1.0, tag
+`lab5-2pc`). When a battle ended, Battle Service settled it as a **two-phase commit** across two databases: `battle`
 (the settlement record: the battle becomes `finished`, plus a `battle_settlements` row) and `user_management` (the
 winner's +120). `tx_id = settle-{battle_id}`.
 
@@ -2576,7 +2627,7 @@ winner's +120). `tx_id = settle-{battle_id}`.
    transaction without a decision. The loser's penalty, the XP and the capture stay separate idempotent calls after the
    commit (this round).
 
-Every node has `max_prepared_transactions=64`; a prepared transaction is replicated, so it survives a failover. The
+Every node had `max_prepared_transactions=64`; a prepared transaction is replicated, so it survives a failover. The
 currency change still writes `IdempotencyRecords` with `event_id battle:{battle_id}:winner`, so the ETL is unchanged.
 
 **Proof** ([postman/lab5-2pc-e2e.md](./postman/lab5-2pc-e2e.md): requests, answers and both services' logs of a commit,
@@ -2588,8 +2639,8 @@ an abort, and a prepared transaction committed on the new primary after `docker 
 | Tag | [`lab5-2pc`](https://github.com/filipel2004/user-management-service/tree/lab5-2pc) | [`lab5-2pc`](https://github.com/filipel2004/battle-service/tree/lab5-2pc) |
 | Image | `filipel2004/user-management-service:4.1.0` | `filipel2004/battle-service:4.1.0` |
 
-The CPR commit that pins these images is tagged `lab5-2pc` too. The two-phase commit is replaced by the broker saga in
-the next round (Grade 9); the tags keep the 2PC version.
+The CPR commit that pins these images is tagged `lab5-2pc` too. The two-phase commit was replaced by the broker saga
+(Grade 9); the tags keep the 2PC version.
 
 ### Environment every service now gets
 
@@ -2601,5 +2652,5 @@ the next round (Grade 9); the tags keep the 2PC version.
 | `CACHE_LOOKUP_TTL_SECONDS`, `DATABASE_FAILOVER_WAIT_SECONDS` | 30 s, 5 s by default | Monster Raid, Map |
 | `BROKER_SAGA_WAIT`, `BROKER_SAGA_STEP_ATTEMPTS`, `BROKER_SAGA_COMPENSATION_ATTEMPTS` | `10s`, `5`, `10` | Message Broker 1.4.0 |
 
-Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**, Map and Monster Raid **2.4.0**, etl-service **1.0.0**, User Management and Battle **4.1.0**.
+Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**, Map and Monster Raid **2.4.0**, etl-service **1.0.0**, User Management **5.0.0** and Battle **5.0.1** (4.1.0: the two-phase-commit version, tag `lab5-2pc`).
 

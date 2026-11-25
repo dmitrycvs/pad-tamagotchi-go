@@ -1,0 +1,1776 @@
+{
+  "info": {
+    "name": "Lab 5 final check",
+    "description": "Lab 5 \"Sharding and Replication\": one folder per grade. Select the local Tamagotchi environment (service_jwt_secret from .env) and run the whole collection in order against a running stack.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Signs service_jwt with the stack secret (a local environment, never exported).",
+          "// User tokens come from the login requests.",
+          "const v = (k) => pm.variables.get(k) || '';",
+          "if (JSON.stringify(pm.request.toJSON()).includes('{{service_jwt}}')) {",
+          "  if (v('service_jwt_secret').length < 32) {",
+          "    throw new Error('Select the local Tamagotchi environment: service_jwt_secret must match .env (at least 32 characters).');",
+          "  }",
+          "  const b64url = (w) => CryptoJS.enc.Base64.stringify(w).split('=').join('').split('+').join('-').split('/').join('_');",
+          "  const enc = (o) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(o)));",
+          "  const now = Math.floor(Date.now() / 1000);",
+          "  const body = enc({ alg: 'HS256', typ: 'JWT' }) + '.' + enc({ sub: 'postman', roles: ['service'], iat: now, exp: now + 3600 });",
+          "  pm.collectionVariables.set('service_jwt', body + '.' + b64url(CryptoJS.HmacSHA256(body, v('service_jwt_secret'))));",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "broker_url",
+      "value": "http://localhost:8070"
+    },
+    {
+      "key": "cache_router_url",
+      "value": "http://localhost:8094"
+    },
+    {
+      "key": "etl_url",
+      "value": "http://localhost:8095"
+    },
+    {
+      "key": "package_id",
+      "value": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    },
+    {
+      "key": "missing_id",
+      "value": "00000000-0000-4000-8000-000000000000"
+    },
+    {
+      "key": "run_password",
+      "value": "Lab5-Check-Password1!"
+    },
+    {
+      "key": "run_id",
+      "value": ""
+    },
+    {
+      "key": "service_jwt",
+      "value": ""
+    },
+    {
+      "key": "raid_guild_id",
+      "value": ""
+    },
+    {
+      "key": "etl_run_id",
+      "value": ""
+    },
+    {
+      "key": "a_id",
+      "value": ""
+    },
+    {
+      "key": "a_jwt",
+      "value": ""
+    },
+    {
+      "key": "b_id",
+      "value": ""
+    },
+    {
+      "key": "b_jwt",
+      "value": ""
+    },
+    {
+      "key": "c_id",
+      "value": ""
+    },
+    {
+      "key": "c_jwt",
+      "value": ""
+    },
+    {
+      "key": "a1",
+      "value": ""
+    },
+    {
+      "key": "a2",
+      "value": ""
+    },
+    {
+      "key": "b1",
+      "value": ""
+    },
+    {
+      "key": "b2",
+      "value": ""
+    },
+    {
+      "key": "c1",
+      "value": ""
+    },
+    {
+      "key": "c2",
+      "value": ""
+    },
+    {
+      "key": "battle_completed",
+      "value": ""
+    },
+    {
+      "key": "battle_compensated",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Architecture: every Lab 5 component answers (Grades 2, 3)",
+      "description": "The architecture diagram in the README shows the final Lab 5 system: Data Warehouse, ETL, Cache, the replicated PostgreSQL and the saga coordinator, plus the components that were missing before (Firebase Cloud Messaging, PostGIS, the guild chat Redis, monitoring). These requests check that each new component is running.",
+      "item": [
+        {
+          "name": "01 Gateway health",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const suffix = Date.now().toString() + Math.floor(Math.random() * 10000).toString();",
+                  "pm.collectionVariables.set('run_id', suffix);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 ok', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "02 Broker health (saga coordinator)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{broker_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "03 cache-router health: three shards up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, every shard up', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const shards = pm.response.json().shards;",
+                  "  pm.expect(Object.keys(shards)).to.have.lengthOf(3);",
+                  "  Object.values(shards).forEach((s) => pm.expect(s).to.eql('up'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{cache_router_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "04 ETL service health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{etl_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Data warehouse and ETL (Grade 4)",
+      "description": "etl-service reads the service databases from a standby and loads the data-warehouse star schema (host port 5433, database tamagotchi_dw). The example analytics queries are in the README, \"Data warehouse and ETL\".",
+      "item": [
+        {
+          "name": "05 Start an ETL run",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202 with a run id (409 if one is already running)', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([202, 409]);",
+                  "});",
+                  "if (pm.response.code === 202) pm.collectionVariables.set('etl_run_id', pm.response.json().run_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{etl_url}}/api/etl/runs",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "06 List ETL runs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 with runs', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  const runs = Array.isArray(body) ? body : body.runs;",
+                  "  pm.expect(runs).to.be.an('array').and.not.empty;",
+                  "  if (!pm.collectionVariables.get('etl_run_id')) pm.collectionVariables.set('etl_run_id', runs[0].run_id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{etl_url}}/api/etl/runs?limit=5",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "07 Get one run: rows per table",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 for the run', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().run_id).to.eql(pm.collectionVariables.get('etl_run_id'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{etl_url}}/api/etl/runs/{{etl_run_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "08 Unknown run -> 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{etl_url}}/api/etl/runs/{{missing_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "09 Runs without a token -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{etl_url}}/api/etl/runs",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Replication and failover (Grade 5)",
+      "description": "postgres-0 is the primary, postgres-1 and postgres-2 stream from it, postgres-failover promotes a standby. Failover demo, then run this folder again: docker compose stop postgres-0; docker compose logs -f postgres-failover (FAILOVER: promoted postgres-1 after about 7 s); request 12 answers 200 again within about 15 s. docker compose start postgres-0 rejoins it as a standby. Commands: README, \"Database replication and failover\".",
+      "item": [
+        {
+          "name": "10 Register user a",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"lab5_a_{{run_id}}\",\n  \"email\": \"lab5_a_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\",\n  \"package_id\": \"{{package_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11 Log in user a",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 with a JWT that carries a jti', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const jwt = pm.response.json().jwt;",
+                  "  const claims = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "  pm.expect(claims.jti).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('a_jwt', pm.response.json().jwt);",
+                  "pm.collectionVariables.set('a_id', pm.response.json().user_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"lab5_a_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12 Read through the gateway (repeat after stopping the primary)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/users/{{a_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Caching of GETs and auth data (Grade 6)",
+      "description": "Services cache their common GETs through cache-router (X-Cache: HIT|MISS) and evict on write. The gateway caches verified tokens (auth:token:{sha256}), User Management caches the login lookup (auth:user:{email}), and logout writes auth:revoked:{jti}, which the gateway checks on every request.",
+      "item": [
+        {
+          "name": "13 Raid list, first read -> X-Cache MISS",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('raid_guild_id', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, X-Cache MISS', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.eql('MISS');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/raids?guild_id={{raid_guild_id}}&status=active",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14 Same read again -> X-Cache HIT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, X-Cache HIT', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.eql('HIT');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/raids?guild_id={{raid_guild_id}}&status=active",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "15 Log out (gateway -> User Management, auth:revoked:{jti})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, token revoked', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().revoked).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/auth/logout",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "16 The logged-out token -> 401 revoked",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401 Token has been revoked.', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().error).to.eql('Token has been revoked.');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/users/{{a_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "17 Log in again (new jti)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('a_jwt', pm.response.json().jwt);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"lab5_a_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "18 The new token works",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/users/{{a_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Consistent hashing (Grade 7)",
+      "description": "Research: cache-router/docs/consistent-hashing.md (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots).",
+      "item": [
+        {
+          "name": "19 The ring: three shards, 150 virtual nodes each",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, three shards', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(JSON.stringify(pm.response.json())).to.include('redis-cache-3');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{cache_router_url}}/ring",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "20 Which shard owns a key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 with a shard', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(JSON.stringify(pm.response.json())).to.match(/redis-cache-[123]/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{cache_router_url}}/ring/locate?key=auth:user:lab5",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "21 Adding a shard moves ~1/N keys on the ring, ~3/4 with mod N",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('The ring moves far fewer keys than mod N', () => {",
+                  "  const s = JSON.stringify(pm.response.json());",
+                  "  pm.expect(s).to.include('ring');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{cache_router_url}}/ring/simulate?keys=10000&add=redis-cache-4",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Two-phase commit (Grade 8, replaced by the saga)",
+      "description": "Grade 8 was built first and then replaced by the saga (Grade 9), as the lab asks. The proof is kept: tag lab5-2pc in this repository, user-management-service and battle-service, images 4.1.0, and postman/lab5-2pc-e2e.md (a commit, an abort, and a prepared transaction committed on the new primary after a failover).",
+      "item": [
+        {
+          "name": "22 The 2PC participant routes are gone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404 at the gateway', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/tx/{{missing_id}}/prepare",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Long-running saga in the broker (Grade 9)",
+      "description": "A finished battle is settled by one saga on the Message Broker's coordinator (POST /api/transactions): settlement, winner +120, loser -60, four XP awards, capture. The second battle's loser has no currency, so step 3 is rejected with 409 and the broker undoes steps 2 and 1.",
+      "item": [
+        {
+          "name": "23 Register user b",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"lab5_b_{{run_id}}\",\n  \"email\": \"lab5_b_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\",\n  \"package_id\": \"{{package_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "24 Log in user b",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 with a JWT that carries a jti', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const jwt = pm.response.json().jwt;",
+                  "  const claims = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "  pm.expect(claims.jti).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('b_jwt', pm.response.json().jwt);",
+                  "pm.collectionVariables.set('b_id', pm.response.json().user_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"lab5_b_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "25 Register user c",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"lab5_c_{{run_id}}\",\n  \"email\": \"lab5_c_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\",\n  \"package_id\": \"{{package_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "26 Log in user c",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 with a JWT that carries a jti', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const jwt = pm.response.json().jwt;",
+                  "  const claims = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "  pm.expect(claims.jti).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('c_jwt', pm.response.json().jwt);",
+                  "pm.collectionVariables.set('c_id', pm.response.json().user_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"lab5_c_{{run_id}}@example.invalid\",\n  \"password\": \"{{run_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "27 Create Tamagotchi a1 (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('a1', pm.response.json().tamagotchi_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{a_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"a1\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/a1.png\",\n  \"stats\": {\n    \"hunger\": 100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "28 Create Tamagotchi a2 (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('a2', pm.response.json().tamagotchi_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{a_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"a2\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/a2.png\",\n  \"stats\": {\n    \"hunger\": 100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "29 Create Tamagotchi b1 (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('b1', pm.response.json().tamagotchi_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{b_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"b1\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/b1.png\",\n  \"stats\": {\n    \"hunger\": 100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "30 Create Tamagotchi b2 (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('b2', pm.response.json().tamagotchi_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{b_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"b2\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/b2.png\",\n  \"stats\": {\n    \"hunger\": 100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "31 Create Tamagotchi c1 (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('c1', pm.response.json().tamagotchi_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{c_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"c1\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/c1.png\",\n  \"stats\": {\n    \"hunger\": 100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "32 Create Tamagotchi c2 (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('c2', pm.response.json().tamagotchi_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/tamagotchi-service/api/tamagotchis",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{c_id}}\",\n  \"package_id\": \"{{package_id}}\",\n  \"name\": \"c2\",\n  \"type\": \"flame\",\n  \"sprite_ref\": \"{{package_id}}/sprites/c2.png\",\n  \"stats\": {\n    \"hunger\": 100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "33 Give b 100 global currency (broker, service JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, balance 100', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().balance).to.eql(100);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{broker_url}}/q/user-management-service/api/users/{{b_id}}/currency",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"postman-grant-{{run_id}}\",\n  \"currency\": \"global\",\n  \"amount\": 100,\n  \"reason\": \"postman_grant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "34 completed: a challenges b",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201 awaiting_opponent', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().status).to.eql('awaiting_opponent');",
+                  "});",
+                  "pm.collectionVariables.set('battle_completed', pm.response.json().battle_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/battles",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challenger_id\": \"{{a_id}}\",\n  \"opponent_id\": \"{{b_id}}\",\n  \"challenger_lineup\": {\n    \"primary_id\": \"{{a1}}\",\n    \"secondary_id\": \"{{a2}}\",\n    \"boosts\": []\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "35 completed: b accepts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 in_progress', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('in_progress');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/battles/{{battle_completed}}/accept",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{b_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"primary_id\": \"{{b1}}\",\n  \"secondary_id\": \"{{b2}}\",\n  \"boosts\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "36 completed: b forfeits -> settled by the saga",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 settlement_status completed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().settlement_status).to.eql('completed');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/battles/{{battle_completed}}/forfeit",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{b_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "37 completed: the broker's saga log, 8 steps completed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, status completed, every step completed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.status).to.eql('completed');",
+                  "  pm.expect(tx.steps).to.have.lengthOf(8);",
+                  "  tx.steps.forEach((s) => pm.expect(s.status).to.eql('completed'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{broker_url}}/api/transactions/settle-{{battle_completed}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "38 compensated: a challenges c",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201 awaiting_opponent', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().status).to.eql('awaiting_opponent');",
+                  "});",
+                  "pm.collectionVariables.set('battle_compensated', pm.response.json().battle_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/battles",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challenger_id\": \"{{a_id}}\",\n  \"opponent_id\": \"{{c_id}}\",\n  \"challenger_lineup\": {\n    \"primary_id\": \"{{a1}}\",\n    \"secondary_id\": \"{{a2}}\",\n    \"boosts\": []\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "39 compensated: c accepts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 in_progress', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('in_progress');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/battles/{{battle_compensated}}/accept",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{c_jwt}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"primary_id\": \"{{c1}}\",\n  \"secondary_id\": \"{{c2}}\",\n  \"boosts\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "40 compensated: c (no currency) forfeits -> 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409 settlement_status compensated', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().settlement_status).to.eql('compensated');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/battles/{{battle_compensated}}/forfeit",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{c_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "41 compensated: step 3 failed, steps 2 and 1 undone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, status compensated', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const tx = pm.response.json();",
+                  "  pm.expect(tx.status).to.eql('compensated');",
+                  "  pm.expect(tx.steps.map((s) => s.status).slice(0, 3)).to.eql(['compensated', 'compensated', 'failed']);",
+                  "  pm.expect(tx.steps[2].http_status).to.eql(409);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{broker_url}}/api/transactions/settle-{{battle_compensated}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{service_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "42 compensated: the winner's balance is unchanged",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200, a kept only the first battle reward (120)', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().global_currency).to.eql(120);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/users/{{a_id}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Internal routes and order (Grade 10)",
+      "description": "New endpoints and DTOs are in the README Communication Contract (10. Cache Router, 11. Saga Transactions, 12. ETL Service, Logout, the settlement steps). Every image is released on DockerHub and pinned in Compose.",
+      "item": [
+        {
+          "name": "43 The saga step routes are not public",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404 at the gateway', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.headers.get('X-Gateway-Error')).to.eql('true');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/battles/{{battle_completed}}/settlement",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "44 The broker transaction API is not routed by the gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/transactions/settle-{{battle_completed}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{a_jwt}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

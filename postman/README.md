@@ -117,6 +117,31 @@ execute every source service's HTTP client. Full battle/raid/proximity and
 Firebase delivery remain separate integration scenarios. See [issue #55](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/55)
 for actual results and owner blockers.
 
+## Lab 5: final check
+
+Import [lab5-final.postman_collection.json](./lab5-final.postman_collection.json),
+select the local Tamagotchi environment (`service_jwt_secret` from `.env`) and
+run the **whole collection** in order with the Collection Runner, or:
+
+```sh
+npx newman run postman/lab5-final.postman_collection.json -e postman/tamagotchi.local.postman_environment.json
+```
+
+It signs up three test users with fresh ids on every run, so it can be run again
+right away. A successful run has 44 requests and 45 passing assertions, and
+takes about 7 s.
+
+| Folder | Grade | What it proves |
+| --- | --- | --- |
+| 1. Architecture | 2, 3 | Every Lab 5 component in the diagram runs: gateway, broker (saga coordinator), cache-router with three shards up, ETL. |
+| 2. Data warehouse and ETL | 4 | An ETL run starts (202), runs are listed with rows per table, an unknown run is 404 and no token is 401. |
+| 3. Replication and failover | 5 | A read through the gateway. Run it again after `docker compose stop postgres-0`: the failover monitor promotes a standby and it answers 200 within about 15 s. |
+| 4. Caching | 6 | A raid list read is `X-Cache: MISS`, then `HIT`. Logout revokes the token (`auth:revoked:{jti}`), the gateway rejects it with 401 `Token has been revoked.`, and a new login works. |
+| 5. Consistent hashing | 7 | The ring, the owner of a key, and `/ring/simulate`: adding a shard moves about 1/4 of the keys on the ring and about 3/4 with mod N. |
+| 6. Two-phase commit | 8 | The 2PC participant routes are gone (404). The proof of Grade 8 is the `lab5-2pc` tag and [lab5-2pc-e2e.md](./lab5-2pc-e2e.md). |
+| 7. Saga | 9 | A battle whose loser can pay is settled by an 8-step saga (`completed`). A loser with no currency makes step 3 fail with 409: the broker undoes steps 2 and 1, the forfeit answers 409 `compensated`, and the winner keeps only the first reward. |
+| 8. Internal routes | 10 | The saga step routes and the broker's transaction API are not reachable through the gateway. |
+
 ## Lab 5: cache-router check
 
 [lab5-cache.postman_collection.json](./lab5-cache.postman_collection.json) checks the consistent-hash

@@ -24,7 +24,7 @@ The **API Gateway** authenticates external clients and relays their requests to 
 | - | -------------------------- | ----------------------------------------------------- |
 | 1 | **Costov Maxim**     | Guild Service, Package Registry Service               |
 | 2 | **Cvasiuc Dmitrii**  | Tamagotchi Service, Notification Service, API Gateway |
-| 3 | **Tatarintev Denis** | Map Service, Monster Raid Service                     |
+| 3 | **Tatarintev Denis** | Map Service, Monster Raid Service, ETL Service        |
 | 4 | **Obrijan Filip**    | User Management Service, Battle Service               |
 
 Services are paired by coupling: each owner holds the two services that talk to each other most often, which keeps cross-owner coordination to the documented contract below.
@@ -48,58 +48,95 @@ Services are paired by coupling: each owner holds the two services that talk to 
 
 ## Architecture Diagram
 
+The final Lab 5 system. `×2` marks a service that runs two replicas; the two black dots are the broker's
+connection to every business service.
+
 ```mermaid
 flowchart TB
-    Clients["Clients / Postman"]
+    Actor(["Client / Postman"])
+    Gateway["API Gateway :8080<br/>JWT check, token cache, revoked tokens"]
+    Discovery["Service Discovery :8761"]
+    Discord[/"Discord alerts"/]
+    Broker["Message Broker :8070 / gRPC :9070<br/>queues, topics, dead letters, saga coordinator"]
 
-    Gateway["API Gateway :8080<br/>JWT, internal routes 404,<br/>admin log download"]
+    Actor --> Gateway
+    Gateway --> Discovery
+    Discovery --> Discord
+    Gateway --> Broker
+    Discovery --> Broker
+    Broker -.-> Discord
 
-    subgraph BrokerBox["Message Broker :8070 HTTP / :9070 gRPC"]
-        Queues["Request queues /q/{service}<br/>subscriber-based"]
-        Topics["Topic queues<br/>/api/topics/{topic}/events"]
-        Routing["Least-load balancer<br/>circuit breaker + reroute"]
-        DLC["Dead letter channel<br/>/api/dead-letters"]
-    end
-
-    BrokerDB[("PostgreSQL message_broker<br/>durable messages")]
-
-    Services["Eight business services, two replicas each<br/>User Management, Battle, Tamagotchi, Notification,<br/>Map, Monster Raid, Guild, Package Registry<br/>gRPC Consumer :9000"]
-
-    Discord["Discord alerts"]
-    Discovery["Service Discovery :8761<br/>instances, topics, grpc_port, load"]
-    ServiceDBs[("Separate PostgreSQL databases")]
-    Redis[("Redis<br/>guild events")]
-
-    subgraph Monitoring
+    subgraph Monitoring["Monitoring"]
         Prometheus["Prometheus :9090"]
-        Logs["Shared volume<br/>/var/log/tamagotchi"]
-        Alloy --> Loki
+        Loki["Alloy + Loki<br/>logs"]
         Grafana["Grafana :3000"]
+        Grafana --> Prometheus & Loki
     end
+    Prometheus -.->|"scrape /metrics"| Broker
 
-    Clients -->|"REST + JWT"| Gateway
-    Gateway -->|"HTTP, trusted identity"| Queues
-    Clients <-.->|"WebSocket / SignalR after negotiation"| Services
-    Queues --> Routing
-    Topics --> Routing
-    Routing -->|"gRPC Consumer.Handle / Deliver :9000<br/>HTTP fallback"| Services
-    Services -->|"gRPC Broker.Call / Broker.Publish"| BrokerBox
-    BrokerBox --> BrokerDB
-    Routing -->|"after 5 failed attempts"| DLC
-    Services -.->|"register + heartbeat"| Discovery
-    Discovery -.->|"health and load polls"| Services
-    BrokerBox -.->|"instance cache, 5 s"| Discovery
-    Gateway -.->|"realtime instance cache"| Discovery
-    Services --> ServiceDBs
-    Services <-->|"Guild chat"| Redis
-    Prometheus -.->|"HTTP SD via broker"| BrokerBox
-    Prometheus -->|"scrape /metrics"| Services
-    Gateway & BrokerBox & Services -->|"JSON logs"| Logs
-    Logs --> Alloy
-    Logs -->|"zip download"| Gateway
-    BrokerBox & Discovery -.-> Discord
-    Grafana --> Prometheus
-    Grafana --> Loki
+    subgraph Cache["Cache (all services)"]
+        Router["cache-router :8090<br/>consistent hash ring"]
+        R1[("redis-cache-1")]
+        R2[("redis-cache-2")]
+        R3[("redis-cache-3")]
+        Router --> R1 & R2 & R3
+    end
+    Gateway -.->|"auth data"| Router
+
+    Bus1(( )):::bus
+    Bus2(( )):::bus
+    Broker <--> Bus1
+    Bus1 <-----> Bus2
+
+    UM["User Management ×2"]
+    Battle["Battle ×2"]
+    Tama["Tamagotchi ×2"]
+    Notif["Notification ×2"]
+    UMDB[("user_management")]
+    BattleDB[("battle")]
+    TamaDB[("tamagotchi")]
+    NotifDB[("notification")]
+    Bus1 --> UM & Battle & Tama & Notif
+    UM --> UMDB
+    Battle --> BattleDB
+    Tama --> TamaDB
+    Notif --> NotifDB
+
+    Map["Map ×2"]
+    Raid["Monster Raid ×2"]
+    Guild["Guild ×2"]
+    Registry["Package Registry ×2"]
+    MapDB[("map + PostGIS")]
+    RaidDB[("monster_raid")]
+    GuildDB[("guild")]
+    RegistryDB[("package_registry")]
+    Bus2 --> Map & Raid & Guild & Registry
+    Map --> MapDB
+    Raid --> RaidDB
+    Guild --> GuildDB
+    Registry --> RegistryDB
+
+    Notif --> FCM[/"Firebase Cloud Messaging"/]
+    Guild <--> Redis[("redis: guild chat")]
+
+    subgraph Postgres["Replicated PostgreSQL, holds every DB"]
+        P0[("postgres-0 primary")]
+        P1[("postgres-1 standby")]
+        P2[("postgres-2 standby")]
+        Failover["postgres-failover"]
+        P0 -->|"streaming"| P1 & P2
+        Failover -.->|"promotes a standby"| P1 & P2
+    end
+    RegistryDB ~~~ P0
+
+    subgraph Analytics["Analytics"]
+        ETL["etl-service :8095"]
+        DW[("data-warehouse")]
+        ETL --> DW
+    end
+    P1 & P2 -->|"read"| ETL
+
+    classDef bus fill:#333,stroke:#333,color:#333
 ```
 
 **How a request travels (Lab 4).** A client calls the API Gateway with a JWT. The gateway checks it,
@@ -125,11 +162,27 @@ and scrapes its `/metrics`. Every service writes JSON log lines to the shared `/
 volume; Alloy ships them to Loki, and admins download them as a zip through the gateway. Grafana
 shows both. The broker and Service Discovery send Discord alerts.
 
+**Cache (Lab 5).** The gateway and every business service read through `cache-router`, which places each
+key on one of `redis-cache-1..3` with a consistent hash ring (150 virtual nodes per shard). The gateway caches
+verified tokens and checks logged-out ones (`auth:revoked:{jti}`); the services cache their common GETs and
+evict on write. A shard that is down is a miss: everything falls back to its database.
+
+**Data (Lab 5).** Every service database and the broker's `message_broker` live on one PostgreSQL cluster:
+`postgres-0` is the first primary, `postgres-1` and `postgres-2` stream from it, and `postgres-failover`
+promotes the most up-to-date standby when the primary stops answering. Services connect with multi-host
+connection strings, so they follow the new primary without a restart. `etl-service` reads the standbys and
+loads the `data-warehouse` star schema every 5 minutes.
+
+**Battle settlement (Lab 5).** When a battle ends, Battle starts one saga on the broker's coordinator
+(`POST /api/transactions`): settlement, both currency changes, four XP awards and the capture. If a step fails,
+the broker runs the compensations of the finished steps in reverse order. Before the saga, the same settlement
+was a two-phase commit coordinated by Battle (tag `lab5-2pc`).
+
 **How the services communicate:**
 
 - **API Gateway** accepts external client REST, validates JWTs and relays trusted identity to the broker. It negotiates direct realtime sockets and serves the admin log download. **Message Broker** owns request queues, topic queues, durable delivery, the dead letter channel, least-load instance selection and the Lab 3 circuit breaker.
 - **Notification Service** is the delivery boundary. It subscribes to the six notification topics (`user.friend_request_received`, `battle.request_received`, `tamagotchi.captured`, `map.nearby_player_detected`, `raid.started`, `guild.invitation_sent`), and it alone talks to Firebase Cloud Messaging. It never decides *what* an event means, only how it reaches the client.
-- **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle credits global currency and XP through it, and Package Registry grants moderator/admin roles through it.
+- **User Management Service** is the identity root — Map, Guild and Tamagotchi resolve users and relationships through it, Battle's settlement saga credits global currency through it, and Package Registry grants moderator/admin roles through it.
 - **Package Registry Service** is the configuration authority — Battle and Monster Raid read stat-interpretation rules from it before computing damage, and it supplies the stat definitions used when a new Tamagotchi is created.
 - **Monster Raid Service** asks Guild Service *"is this player a member of the guild this raid is bound to?"* before admitting anyone to the boss clicker, and exchanges monster definitions with Package Registry in both directions.
 
@@ -305,6 +358,29 @@ Success (200 OK):
 }
 ```
 
+The JWT carries `sub`, `jti` (unique per token, since User Management 4.1.0), `package_id`, `roles` and `exp`. The
+lookup login needs is cached as `auth:user:{email}` for 5 minutes (Lab 5).
+
+#### Logout
+
+`POST /api/auth/logout` (User Management 4.1.0)
+Headers: `Authorization: Bearer <jwt>`. No body.
+
+Revokes this token until it expires: User Management stores `auth:revoked:{jti}` on the cache-router with TTL = the
+token's remaining lifetime, and the gateway rejects a token whose `jti` is revoked. User Management reads the token id
+from a forwarded `Authorization` header (verified with `JWT_SECRET`, must be the caller's) or from the gateway headers
+`X-Token-Id` (the `jti`) and `X-Token-Expires` (the `exp`, Unix seconds).
+
+Success (200 OK):
+
+```json
+{ "revoked": true, "jti": "6f1c2a9e0b7d4d0e9a523c1f5e7b8a10", "expires_at": "2026-11-25T15:37:07+00:00", "already_expired": false }
+```
+
+Errors: **400** the token id is missing or invalid, or the token is someone else's; **401** no identity; **403**
+`Logout needs a user token.` (a service caller); **503** `Logout unavailable: the token could not be revoked. Retry
+shortly.` with `Retry-After: 1` when the cache did not store it (logout never pretends to succeed).
+
 #### Get User Profile
 
 `GET /api/users/{user_id}`
@@ -419,6 +495,22 @@ Error (409 Conflict):
 
 ```json
 { "error": "Insufficient global currency." }
+```
+
+#### Two-Phase Commit Participant (removed in 5.0.0)
+
+User Management **4.1.0** (tag `lab5-2pc`) took part in the battle settlement's two-phase commit, Battle Service
+coordinating, through the routes below. Since 5.0.0 the settlement is a saga on the broker that uses Adjust Currency
+(with negative amounts as compensations), and these routes answer 404. Kept here as the Grade 8 record.
+
+| Method | Path | Body | Success | Errors |
+| --- | --- | --- | --- | --- |
+| POST | `/api/tx/{tx_id}/prepare` | the Adjust Currency body plus `user_id`: `{ "user_id", "currency": "global", "amount", "event_id", "reason" }` | 200 vote yes: the change ran in a transaction ended with `PREPARE TRANSACTION '{tx_id}:user-management-service'` | 409 `Insufficient global currency.`, 404 `User not found.` (vote no), 400, 401, 403 |
+| POST | `/api/tx/{tx_id}/commit` | | 200 `committed` / `already_committed` (`COMMIT PREPARED`) | 404 `not_prepared` |
+| POST | `/api/tx/{tx_id}/abort` | | 200 `aborted` / `nothing_to_abort` (`ROLLBACK PREPARED`) | 409 `already_committed` |
+
+```json
+{ "tx_id": "settle-<battle_id>", "participant": "user-management-service", "phase": "prepare", "vote": "yes", "outcome": "prepared", "balance": 1370, "error": null }
 ```
 
 ---
@@ -539,9 +631,26 @@ Success (200 OK):
   "stat_bonus": 1.1,
   "opponent_hp": 98,
   "next_turn": "user-uuid-456",
-  "battle_over": false
+  "battle_over": false,
+  "settlement_status": null
 }
 ```
+
+On the last turn (`battle_over: true`) the battle is saved as `settling` and settled at once by a saga on the broker
+([Battle settlement: saga](#battle-settlement-saga-grade-9)); `settlement_status` is then `completed`, `compensated`
+(a step failed and the completed ones were undone), `failed` (an undo kept failing) or `running` (still running after
+6 s; Battle follows it). `GET /api/battles/{battle_id}` and the result carry the same field. A forfeit answers 200 with
+the result, **202** `{ battle_id, status, settlement_status: "running" }` while the saga runs, or
+`409 { "error": "The battle could not be settled.", "settlement_status": "compensated" }`.
+
+#### Settlement Saga Steps (internal, Battle 5.0.0)
+
+Called by the Message Broker while it runs the battle's settlement saga (service identity only). Both are idempotent.
+
+| Method | Path | Body | Success | Errors |
+| --- | --- | --- | --- | --- |
+| POST | `/api/battles/{battle_id}/settlement` | `{ "event_id": "battle-{id}-settle" }` | 200 `{ battle_id, status: "finished", winner_id, loser_id, finished_at, outcome: "settled" \| "already_settled" }` | 400 no `event_id`, 401, 403 a user, 404, 409 `Battle is not waiting for its settlement.` / `The settlement of this battle was cancelled.` |
+| POST | `/api/battles/{battle_id}/settlement/cancel` | `{ "event_id": "battle-{id}-settle-cancel" }` | 200 `{ battle_id, status: "settling", settlement_status: "compensated", outcome: "cancelled" \| "cancelled_before_settlement" \| "nothing_to_undo" }` | 400, 401, 403, 404 |
 
 Error (409 Conflict):
 
@@ -570,6 +679,7 @@ Headers: `Authorization: Bearer <jwt>`
       "xp": { "primary": 24, "secondary": 16 }
     }
   },
+  "settlement_status": "completed",
   "finished_at": "2026-09-09T12:11:30Z"
 }
 ```
@@ -991,6 +1101,7 @@ Headers: `Authorization: Bearer <jwt>`
 #### Get a Single User's Last Known Location
 
 `GET /api/map/users/{user_id}/location`
+Cached through the cache-router for 5 s (Lab 5, Map 2.4.0, `X-Cache: HIT|MISS`); a new location evicts it.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1036,6 +1147,7 @@ Server → Client:
 #### List Active Raids
 
 `GET /api/raids?guild_id={guild_id}&status=active`
+Cached through the cache-router for 5 s (Lab 5, Monster Raid 2.4.0, `X-Cache: HIT|MISS`); schedule, join and damage evict it.
 Headers: `Authorization: Bearer <jwt>`
 
 ```json
@@ -1058,6 +1170,7 @@ Headers: `Authorization: Bearer <jwt>`
 #### Get Raid Details
 
 `GET /api/raids/{raid_id}`
+Cached through the cache-router for 5 s (Lab 5, Monster Raid 2.4.0, `X-Cache: HIT|MISS`); join and damage evict it.
 Headers: `Authorization: Bearer <jwt>`
 
 ```json
@@ -1143,6 +1256,7 @@ Success (200 OK):
 #### Get Raid Leaderboard
 
 `GET /api/raids/{raid_id}/leaderboard`
+Cached through the cache-router for 5 s (Lab 5, Monster Raid 2.4.0, `X-Cache: HIT|MISS`); join and damage evict it.
 Headers: `Authorization: Bearer <jwt>`
 
 ```json
@@ -1222,6 +1336,8 @@ Success (201 Created):
 
 `GET /api/guilds/{guild_id}`
 Headers: `Authorization: Bearer <jwt>`
+Cached through the cache-router (Lab 5, Guild 3.3.0, `X-Cache: HIT|MISS`); joining, a role change or a
+removal evicts it.
 
 ```json
 {
@@ -1280,7 +1396,8 @@ Success (204 No Content)
 #### Verify Membership
 
 `GET /api/guilds/{guild_id}/members/{user_id}`
-Used by the Monster Raid Service to confirm raid eligibility.
+Used by the Monster Raid Service to confirm raid eligibility. Cached through the cache-router (Lab 5,
+Guild 3.3.0): the reply carries `X-Cache: HIT` or `MISS` and is otherwise unchanged.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1378,6 +1495,8 @@ Success (201 Created):
 
 `GET /api/packages/{package_id}/stat-definitions`
 Consumed by the Battle Service to interpret a Tamagotchi's package-local stats and derive combat bonuses. Different packages may define completely different statistics.
+Cached through the cache-router (Lab 5, Package Registry 3.3.0, `X-Cache: HIT|MISS`); `PUT` on the same
+path evicts it.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1441,6 +1560,8 @@ Headers: `Authorization: Bearer <jwt>` (requires `admin` role)
 #### List Monster Definitions
 
 `GET /api/monsters`
+Cached through the cache-router (Lab 5, Package Registry 3.3.0, `X-Cache: HIT|MISS`); creating a monster
+or changing its status evicts it.
 Headers: `Authorization: Bearer <service_jwt>`
 
 ```json
@@ -1552,6 +1673,7 @@ Any endpoint can additionally return the errors below. Each carries the header `
 | Status | `error`                                                                                          | When                                   |
 | ------ | -------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | 401    | `Missing or malformed Authorization header.` / `Invalid or expired token.`                     | token missing, badly signed or expired |
+| 401    | `Token has been revoked.`                                                                        | the token was logged out (Lab 5): `auth:revoked:{jti}` exists on the cache-router |
 | 403    | `This endpoint is restricted to internal services.` / `This endpoint requires the admin role.` | wrong token kind or role               |
 | 404    | `No service handles this path.`                                                                  | unknown path                           |
 | 503    | `Gateway is at its concurrent request limit. Retry shortly.` (with `Retry-After: 1`)           | concurrent task limit reached          |
@@ -1560,13 +1682,158 @@ Any endpoint can additionally return the errors below. Each carries the header `
 
 ---
 
+### 10. Cache Router
+
+**Base URL:** `http://cache-router:8090` inside the stack (`CACHE_ROUTER_URL`), `http://localhost:8094` from
+the host. Internal only, no authentication. Shards the cache over `redis-cache-1..3` with a consistent hash
+ring (150 virtual nodes per shard, xxhash64). Full contract:
+[cache-router README](./cache-router/README.md); research: [consistent hashing](./cache-router/docs/consistent-hashing.md).
+
+| Method | Path | Success | Errors |
+| --- | --- | --- | --- |
+| GET | `/cache/{key}` | 200, the stored body with its `Content-Type`, `X-Cache: HIT`, `X-Cache-Shard` | 404 `Cache miss.` (`X-Cache: MISS`; plus `X-Cache-Error: shard unavailable` when the shard is down), 400 invalid key |
+| PUT | `/cache/{key}` (body = value, `X-Cache-TTL: 1..3600`) | 200 `{ "key", "shard", "ttl_seconds", "stored": true }` | 400 bad TTL or key, 413 value over 1 MiB; a down shard gives `"stored": false` |
+| DELETE | `/cache/{key}` | 200 `{ "key", "shard", "deleted": true }` | 400; a down shard gives `"deleted": false, "error"` |
+| DELETE | `/cache?prefix=registry:` | 200 `{ "prefix", "deleted", "shards": [{ "shard", "deleted", "error"? }] }` (SCAN + UNLINK on every shard) | 400 without `prefix` |
+| GET | `/ring` | 200 `{ "hash": "xxhash64", "virtual_nodes_per_shard": 150, "points": 450, "shards": [{ "shard", "virtual_nodes", "share", "share_percent" }] }` | |
+| GET | `/ring/locate?key=` | 200 `{ "key", "hash", "shard", "virtual_node", "point" }` | 400 without `key` |
+| GET | `/ring/simulate?keys=10000&add=redis-cache-4` (or `remove=`) | 200 `{ "keys", "change", "shards_before", "shards_after", "ideal_moved_share", "ring": { "moved", "moved_share", "keys_per_shard_after" }, "mod_n": { ... }, "summary" }` | 400 for both/neither of `add`/`remove`, `keys` outside 1–1000000, a shard already on / not on the ring |
+| GET | `/health`, `/metrics` | shared health shape plus `"shards": { "redis-cache-1:6379": "up" }`; `cache_hits_total`, `cache_misses_total`, `cache_errors_total` per shard | |
+
+A shard that is down never fails the caller: reads miss, writes report `stored: false`. Services fall back
+to their database on any cache error.
+
+### 11. Message Broker: Saga Transactions
+
+**Base URL:** `http://message-broker:8070` (service JWT), or gRPC `Broker.Transact` on `message-broker:9070`.
+Long-running saga transactions with the coordinator in the broker (Lab 5, Grade 9, broker 1.4.0). Full
+contract, retry rules and the battle settlement saga:
+[broker README, "Transactions"](./message-broker/README.md#transactions).
+
+`POST /api/transactions?wait=<seconds>`
+
+```json
+{
+  "tx_id": "battle-42-settlement",
+  "steps": [
+    {
+      "service": "user-management-service",
+      "method": "POST",
+      "path": "/api/users/u-1/currency",
+      "body": { "event_id": "battle-42-reward", "currency": "global", "amount": 120 },
+      "compensation": {
+        "method": "POST",
+        "path": "/api/users/u-1/currency",
+        "body": { "event_id": "battle-42-reward-undo", "currency": "global", "amount": -120 }
+      }
+    }
+  ]
+}
+```
+
+Success: **200** when the saga finished, **202** (`Location: /api/transactions/{tx_id}`) while it still runs:
+
+```json
+{
+  "tx_id": "battle-42-settlement",
+  "status": "completed",
+  "phase": "done",
+  "error": null,
+  "steps": [
+    { "step": 1, "service": "user-management-service", "status": "completed", "error": null, "http_status": 200, "attempts": 1, "compensation_attempts": 0, "response": { "balance": 1370 } }
+  ]
+}
+```
+
+`status` is `running`, `completed`, `compensated` (a step failed and the completed ones were undone in
+reverse order) or `failed` (a compensation kept failing). The same `tx_id` returns the stored state.
+Errors: 400 invalid transaction (POST/PATCH bodies need an `event_id`; every step but a read or the last
+needs a `compensation` with its own `event_id`), 401, 403 for admin-only routes, 409 `tx_id` reused with
+different steps, 503 store unavailable.
+
+`GET /api/transactions/{tx_id}` returns the same shape (404 `Transaction not found.`);
+`GET /api/transactions?status=running&limit=50` returns `{ "transactions": [...], "count", "durable" }`.
+
+Map 2.4.0 and Monster Raid 2.4.0 answer `503 {"error":"Database unavailable. Retry shortly."}` with
+`Retry-After: 1` when a database failover takes longer than 5 s.
+
+### 12. ETL Service
+
+**Base URL:** `http://etl-service:8080` inside the stack, `http://localhost:8095` from the host. Internal:
+not routed by the gateway or the broker. Headers: `Authorization: Bearer <service_jwt>` on every endpoint.
+Full documentation: [etl-service README](https://github.com/MaxKostov/etl-service).
+
+#### Trigger a Run
+
+`POST /api/etl/runs`
+
+Success (202 Accepted, `Location: /api/etl/runs/{run_id}`):
+
+```json
+{ "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc", "status": "running", "trigger": "manual", "started_at": "2026-11-24T13:24:28.604Z" }
+```
+
+Error (409 Conflict):
+
+```json
+{ "error": "An ETL run is already in progress.", "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc" }
+```
+
+#### Get a Run
+
+`GET /api/etl/runs/{run_id}`
+
+```json
+{
+  "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc",
+  "trigger": "manual",
+  "status": "succeeded",
+  "started_at": "2026-11-24T13:24:28.604Z",
+  "finished_at": "2026-11-24T13:24:28.768Z",
+  "duration_ms": 152,
+  "rows_extracted": 28,
+  "rows_loaded": 3,
+  "error": null,
+  "tables": [
+    { "table": "fact_battle", "status": "succeeded", "rows_extracted": 2, "rows_loaded": 1, "duration_ms": 20, "error": null }
+  ]
+}
+```
+
+`trigger` is `schedule` or `manual`. `status` is `running`, `succeeded`, `partial` (some tables failed) or
+`failed`. `rows_loaded` counts rows that were inserted or changed, so loading the same rows again gives 0.
+`tables` has one entry per warehouse table.
+
+Error (404 Not Found):
+
+```json
+{ "error": "ETL run not found." }
+```
+
+#### List Runs
+
+`GET /api/etl/runs?limit=20` (newest first, `limit` 1–100)
+
+```json
+{ "runs": [ { "run_id": "d2db3306-def2-4022-a7fe-dea3abc3c8cc", "status": "succeeded" } ], "count": 1 }
+```
+
+Each run has the shape of *Get a Run*. Error (400): `{ "error": "limit must be a whole number from 1 to 100." }`.
+
+Every endpoint also answers 401 `{ "error": "Missing or invalid service token." }`, 403
+`{ "error": "A service token is required." }` and 503 `{ "error": "Data warehouse unavailable." }`.
+`GET /health` and `GET /metrics` need no token; metrics add `etl_runs_total`, `etl_rows_extracted_total`,
+`etl_rows_loaded_total`, `etl_last_run_duration_seconds` and `etl_last_success_timestamp_seconds`.
+
+---
+
 ## Running the Services
 
 ### Requirements
 
 - **Docker** 24+ and **Docker Compose v2** (`docker compose`, not `docker-compose`)
-- Roughly **8 GB** of free RAM for the complete application and monitoring stack (25 long-running containers plus two initialization/readiness jobs)
-- Ports **3000**, **5432**, **8070**, **8080**, **8082–8093**, **8761**, **9070** and **9090** free on the host
+- Roughly **8 GB** of free RAM for the complete application and monitoring stack (34 long-running containers plus two initialization/readiness jobs)
+- Ports **3000**, **5432–5435**, **8070**, **8080**, **8082–8095**, **8761**, **9070** and **9090** free on the host
 - No language toolchains needed: every service runs from a published image
 
 ### Setup
@@ -1582,11 +1849,18 @@ docker compose up -d
 Firebase service-account JSON. Nothing in this repository contains real secrets;
 `.env.example` documents the shape only.
 
-The database is a single **PostGIS-enabled PostgreSQL 16** instance. Each service
-owns a separate logical database inside it, created on first boot by
-[`db/init/01-create-databases.sql`](./db/init/01-create-databases.sql). Data
-persists in the named volume `postgres-data`, so `docker compose down` keeps it
-and `docker compose down -v` discards it.
+The database is a replicated **PostGIS-enabled PostgreSQL 16**: the primary `postgres-0` and the hot
+standbys `postgres-1` and `postgres-2` ([Database replication and failover](#database-replication-and-failover)).
+Each service owns a separate logical database inside it, created on first boot by
+[`db/init/01-create-databases.sql`](./db/init/01-create-databases.sql). Data persists in the named
+volumes `postgres-data` (the volume of the single instance before Lab 5, so its data is kept),
+`postgres-1-data`, `postgres-2-data` and `data-warehouse-data`. `docker compose down` keeps them and
+`docker compose down -v` discards them.
+
+**Upgrading from Lab 4:** run `docker compose down` (without `-v`) on the old version first. The old `postgres`
+container uses the volume that `postgres-0` takes over. Then update the `TAG_*` values in `.env`: Map and Monster
+Raid need 2.4.0 or newer, User Management 5.0.0, Battle 5.0.1 and the gateway 5.0.0. The data warehouse publishes
+host port 5433, so `POSTGRES_PORT` must not be 5433.
 
 ### Service Images
 
@@ -1598,17 +1872,23 @@ matching `TAG_*` to `dev` in `.env`.
 
 | Service               | Image                                         | Host port      |
 | --------------------- | --------------------------------------------- | -------------- |
-| **API Gateway** | `dmitrycvs/api-gateway:3.3.0`               | **8080** |
-| User Management       | `filipel2004/user-management-service:4.0.0` | —              |
-| Battle                | `filipel2004/battle-service:4.0.0`          | 8082–8084      |
+| **API Gateway** | `dmitrycvs/api-gateway:5.0.0`               | **8080** |
+| User Management       | `filipel2004/user-management-service:5.0.0` | —              |
+| Battle                | `filipel2004/battle-service:5.0.1`          | 8082–8084      |
 | Tamagotchi            | `dmitrycvs/tamagotchi-service:4.1.0`        | —              |
 | Notification          | `dmitrycvs/notification-service:4.1.0`      | —              |
-| Map                   | `takima/pad-map-service:2.3.0`              | 8085–8087      |
-| Monster Raid          | `takima/pad-monster-raid-service:2.3.0`     | 8088–8090      |
-| Guild                 | `maxkostov/guild-service:3.2.0`             | 8091–8093      |
-| Package Registry      | `maxkostov/package-registry-service:3.2.0`  | —              |
+| Map                   | `takima/pad-map-service:2.4.0`              | 8085–8087      |
+| Monster Raid          | `takima/pad-monster-raid-service:2.4.0`     | 8088–8090      |
+| Guild                 | `maxkostov/guild-service:3.3.0`             | 8091–8093      |
+| Package Registry      | `maxkostov/package-registry-service:3.3.0`  | —              |
 | **Service Discovery** | `maxkostov/service-discovery:3.6.0`         | **8761** |
-| **Message Broker**    | `maxkostov/message-broker:1.3.1`            | **8070**, 9070 |
+| **Message Broker**    | `maxkostov/message-broker:1.4.0`            | **8070**, 9070 |
+| **Cache Router**      | `maxkostov/cache-router:1.0.0`              | **8094** (→ 8090) |
+| Cache shards          | `redis:7.4-alpine` × 3 (`redis-cache-1..3`) | —              |
+| **ETL**               | `takima/etl-service:1.0.0`                  | **8095** (→ 8080) |
+| PostgreSQL nodes      | `postgis/postgis:16-3.4` × 3 (`postgres-0..2`) | **5432**, 5434, 5435 |
+| Failover monitor      | `postgres:16-alpine` (`postgres-failover`)  | —              |
+| Data warehouse        | `postgres:16-alpine` (`data-warehouse`)     | **5433**       |
 
 Clients use the gateway at `http://localhost:8080`. Services also reach each other
 through it: every `*_SERVICE_URL` in `docker-compose.yml` is `http://api-gateway:8080`,
@@ -1721,7 +2001,7 @@ others.
 | **Failure** | The call **times out**, has a **connection error** (refused, unknown host, reset), or gets a **5xx** response. A 4xx is the caller's problem and is not counted. |
 | **Trip** | **3 failures within the caller's request timeout x 3.5**: 8 s x 3.5 = **28 s** for the services, 10 s x 3.5 = **35 s** for the gateway. Successes in between do not reset the count. |
 | **On trip** | Log at **ERROR** with the target, the endpoint, the error count and the window (format below). |
-| **Open** | **Fail fast** for a cooldown (default: the window): no call is made, and the caller answers `503 { "error": "Upstream service unavailable." }`. The gateway first tries the other instances of the service and only answers 503 when every instance's breaker is open. |
+| **Open** | **Fail fast** for a cooldown (default: the window; 5 s in Compose since Lab 5): no call is made, and the caller answers `503 { "error": "Upstream service unavailable." }`. The gateway first tries the other instances of the service and only answers 503 when every instance's breaker is open. |
 | **Half-open** | After the cooldown, **one probe call** goes through. Success closes the breaker; failure opens it again for another cooldown. |
 | **Not covered** | Calls to Service Discovery itself: the registration contract already retries them with backoff. |
 
@@ -1870,7 +2150,7 @@ type/service-name/ShortDescription
 ```
 
 1. **type** — the kind of change (table below).
-2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, `message-broker`, or `shared` for cross-cutting work.
+2. **service-name** — the microservice targeted: `user-service`, `battle-service`, `tamagotchi-service`, `notification-service`, `map-service`, `raid-service`, `guild-service`, `registry-service`, `gateway`, `service-discovery`, `message-broker`, `cache-router`, `etl-service`, or `shared` for cross-cutting work.
 3. **ShortDescription** — concise PascalCase or kebab-case summary, present tense.
 
 | Prefix        | Purpose                                | Example                                     |
@@ -2206,3 +2486,234 @@ max_concurrent`; ties take turns. Every send logs `load=0.050 in_flight=4+1 max_
 
 User Management and Battle 4.0.0 serve `GET /metrics`, write `/var/log/tamagotchi/<service>/<instance_id>.log`,
 fire their notification topics and speak gRPC with the broker (`BROKER_GRPC_URL`, `GRPC_PORT: 9000`).
+
+## Lab 5: Sharding and Replication
+
+The four steps of the Lab 5 Work Queue: Maxim (the broker on a replicated database, the saga coordinator,
+cache-router), Denis (replication, warehouse, ETL), Filip (auth data cache, two-phase commit, then the saga) and
+Dmitrii (gateway auth cache and logout, architecture diagram, final check, release). Tracking issue:
+[#70](https://github.com/dmitrycvs/pad-tamagotchi-go/issues/70).
+
+**Check it all at once:** start the stack, then run
+[postman/lab5-final.postman_collection.json](./postman/lab5-final.postman_collection.json)
+(44 requests, 45 assertions, one folder per grade; [guide](./postman/README.md#lab-5-final-check)).
+
+| Grade | Requirement | Where |
+| --- | --- | --- |
+| 2 | Previously forgotten components on the architecture diagram | [Architecture Diagram](#architecture-diagram): Firebase Cloud Messaging, PostGIS, the guild chat Redis, monitoring and Discord alerts |
+| 3 | Data Warehouse, ETL and Cache on the diagram | [Architecture Diagram](#architecture-diagram): `data-warehouse`, `etl-service`, `cache-router` with `redis-cache-1..3`, plus the replicated PostgreSQL and the saga coordinator |
+| 4 | Data warehouse and ETL | [Data warehouse and ETL](#data-warehouse-and-etl), [12. ETL Service](#12-etl-service) |
+| 5 | Replication + failover | [Database replication and failover](#database-replication-and-failover); broker 1.4.0 accepts a multi-host `DATABASE_URL` and follows the primary after a failover: [broker README, "Replicated database"](./message-broker/README.md#replicated-database) |
+| 6 | Caching of commonly accessed GETs | [cache-router](./cache-router/README.md) in front of `redis-cache-1..3`; the gateway caches verified tokens (`auth:token:{sha256}`) and rejects logged-out ones (`auth:revoked:{jti}`, 401 `Token has been revoked.`), User Management caches the login lookup (`auth:user:{email}`), profiles and relationship lookups and stores logout revocations (`auth:revoked:{jti}`), Battle caches battle state and its stat-definition lookups, Package Registry caches stat definitions and the monster list, Guild caches guilds and membership checks, Monster Raid caches raid lists, details, leaderboards and its Package Registry and Guild lookups, Map the last known location; all evict on write and fall back to the database ([Communication Contract](#10-cache-router)) |
+| 7 | Consistent hashing research; cache sharded with it | [docs/consistent-hashing.md](./cache-router/docs/consistent-hashing.md) (ring, virtual nodes, 1/N versus mod N, Redis Cluster's 16384 hash slots); `GET /ring/simulate` |
+| 8 | Two-phase commit for a change across two databases | [Battle settlement: two-phase commit](#battle-settlement-two-phase-commit-grade-8): Battle coordinated, User Management participated (release 4.1.0, tag `lab5-2pc`); replaced by the saga |
+| 9 | Long-running saga transactions with the coordinator in the broker | `POST /api/transactions`, [broker README, "Transactions"](./message-broker/README.md#transactions); the battle settlement is that saga: [Battle settlement: saga](#battle-settlement-saga-grade-9) (Battle 5.0.1, User Management 5.0.0) |
+| 10 | New endpoints and DTOs in the README | [10. Cache Router](#10-cache-router), [11. Message Broker: Saga Transactions](#11-message-broker-saga-transactions), [12. ETL Service](#12-etl-service), `X-Cache` on the cached Guild, Package Registry, Monster Raid and Map reads; [lab5-final](./postman/lab5-final.postman_collection.json) Postman collection; every image released on DockerHub and pinned in Compose ([Service Images](#service-images)) |
+
+### Cache sharding
+
+```sh
+curl -s http://localhost:8094/ring                                          # shards and their share of the ring
+curl -s "http://localhost:8094/ring/locate?key=guild:g-1"                   # owner of one key
+curl -s "http://localhost:8094/ring/simulate?keys=10000&add=redis-cache-4"  # keys moved: ring ~24%, mod N ~75%
+docker compose stop redis-cache-2                                           # its keys now miss; nothing fails
+curl -s http://localhost:8094/health                                        # "redis-cache-2:6379": "down"
+docker compose start redis-cache-2
+```
+
+The router publishes host port **8094**, not 8090: Monster Raid publishes its replicas on 8088–8090, and
+Docker picks any free port of that range. Inside the stack every service uses
+`CACHE_ROUTER_URL=http://cache-router:8090`.
+
+With the stack's three shard names and 150 virtual nodes, the shards own 32.1%, 30.5% and 37.4% of the
+ring. The spread of a shard's share is about 1/√150 ≈ 8% (1σ), so ±10% is not guaranteed at 150;
+`CACHE_VIRTUAL_NODES=500` brings every shard within ±4% ([measurements](./cache-router/docs/consistent-hashing.md#3-virtual-nodes)).
+
+### Database replication and failover
+
+`postgres-0` (the first primary), `postgres-1` and `postgres-2` run `postgis/postgis:16-3.4` with streaming
+replication, one replication slot per standby and the same settings. Replication is asynchronous: a commit the primary
+acknowledged in the last moment before it died may be missing on the promoted standby.
+
+| Part | What it does |
+| --- | --- |
+| [`db/replication/node-entrypoint.sh`](./db/replication/node-entrypoint.sh) | Starts every node as the primary, as a standby (`pg_basebackup -R -X stream`) or as an old primary that rejoins (`pg_rewind`, otherwise a new clone). Standbys connect to all three hosts with `target_session_attrs=read-write`, so they follow a promoted one |
+| [`db/failover/failover.sh`](./db/failover/failover.sh) | `postgres-failover`: checks the primary every 2 s. After 3 failures it promotes the standby with the highest replay position (`pg_promote()`), logs the switch and alerts Discord if `DISCORD_WEBHOOK_URL` is set. Services wait for this container, which is healthy while some node accepts writes |
+| volume `postgres-cluster` | `/cluster/primary`, the name of the current primary. Only the monitor writes it, *before* it promotes, so a node that comes back always knows whether it may accept writes. One that still does is stopped within about 2 s (fencing) |
+
+Connection strings:
+
+```text
+Go, broker   postgres://<user>:<password>@postgres-0:5432,postgres-1:5432,postgres-2:5432/<db>?target_session_attrs=read-write
+C# (Npgsql)  Host=postgres-0,postgres-1,postgres-2;Port=5432;Database=<db>;Username=<user>;Password=<password>;Target Session Attributes=primary;Host Recheck Seconds=1;Timeout=3
+```
+
+- User Management and Battle also need the Npgsql form: their `postgres://` support does not know host lists.
+- Npgsql: do not put `Target Session Attributes` into an `NpgsqlDataSourceBuilder` (or EF Core's
+  `UseNetTopologySuite`/`MapEnum`, which create one): it throws. Build with `BuildMultiHost()` and use
+  `.WithTargetSession(TargetSessionAttributes.Primary)`, as Map's `ReplicatedDatabase.cs` does.
+- `Host Recheck Seconds=1` matters: Npgsql remembers for 10 s by default that a node is a standby or down.
+- Looking up a *stopped* container's name takes Docker Desktop about 4 s, so every database client has
+  `dns_opt: timeout:1, attempts:1`. The C# services and the PostgreSQL nodes also have `dns: 127.0.0.1`, which
+  makes that lookup fail within milliseconds; they cannot resolve names outside the stack.
+- A failover gives every replica 5xx answers, which open circuit breakers, so Compose sets their cooldown to 5 s
+  instead of the window: `CIRCUIT_BREAKER_COOLDOWN` (broker) and `CIRCUIT_BREAKER_COOLDOWN_SECONDS` (all services).
+
+**Demo.**
+
+```sh
+docker compose exec postgres-0 sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "SELECT application_name, state, sync_state, replay_lsn FROM pg_stat_replication"'  # 2 replicas
+docker compose logs -f postgres-failover &
+docker compose stop postgres-0                  # the primary is gone
+# postgres-failover: check failed (1/3) ... (3/3), FAILOVER: promoted postgres-1
+curl -s http://localhost:8080/api/packages/<package_id> -H "Authorization: Bearer <jwt>"   # 503 for a few seconds, then 200
+docker compose exec postgres-failover cat /cluster/primary; echo                           # postgres-1
+docker compose exec postgres-1 sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "SELECT application_name, state FROM pg_stat_replication"'  # postgres-2
+docker compose start postgres-0                 # rejoins as a standby by itself
+docker compose logs postgres-0 | grep '\[node'  # ... took over: rejoining as a standby, pg_rewind finished
+```
+
+Measured with the released images, two requests per second to each of the eight services through the gateway
+(reads, plus writes to Map), in four failovers in a row: the standby was promoted 6–8 s after the first failed
+check, and the last failed request ended 4–11.5 s after `docker compose stop`. All eight services and the broker
+reconnected without a restart. Under more load, User Management or Battle can answer 500 often enough to open a
+breaker; the broker then removes the instance until its next heartbeat, so those two can need about 20 s.
+
+**How an old primary rejoins.** `docker compose start` (or `up -d`) the node: its entrypoint sees another name
+in `/cluster/primary`, runs `pg_rewind` against the current primary, creates `standby.signal` and starts. If
+`pg_rewind` fails, it clones again. A standby that diverged, or whose WAL the primary no longer has, is rewound
+or cloned after about 20 s without progress. To force a new clone of one node, for example `postgres-2` while it
+is a standby: `docker compose rm -sf postgres-2 && docker volume rm tamagotchi-go_postgres-2-data && docker compose up -d postgres-2`.
+
+Also tested: a frozen primary (`docker compose pause`) that wakes up after the failover is fenced and rejoins; a
+killed primary (`kill -s KILL`) is rewound; a prepared transaction survives the failover; a lost standby volume is
+cloned; a restart of all nodes keeps the current primary.
+
+### Data warehouse and ETL
+
+`data-warehouse` is a separate, non-replicated `postgres:16-alpine` (database `tamagotchi_dw`, host port 5433) with
+a star schema from [`db/warehouse`](./db/warehouse):
+
+| Table | From | Grain |
+| --- | --- | --- |
+| `dim_user`, `dim_tamagotchi`, `dim_package`, `dim_guild`, `dim_date` | User Management, Tamagotchi, Package Registry, Guild | surrogate keys; key 0 is "unknown" |
+| `fact_battle` | Battle | one battle |
+| `fact_raid_damage` | Monster Raid | one participant of a raid |
+| `fact_currency_change` | User Management (`IdempotencyRecords`: the balance after each change, so the amount is the difference) | one applied change |
+| `fact_notification` | Notification | one notification |
+| `fact_location_daily` | Map | one user and day |
+| `etl_runs`, `etl_watermarks` | | bookkeeping |
+
+`etl-service` reads the service databases from a **standby** (`Target Session Attributes=prefer-standby`), only what
+is newer than each table's watermark (minus a 2-minute overlap), and loads it with upserts every `ETL_INTERVAL` (5
+minutes), so a rerun never duplicates a row. Each table is loaded with its watermark in one transaction.
+
+```sh
+curl -s -X POST http://localhost:8095/api/etl/runs -H "Authorization: Bearer <service_jwt>"           # run now
+curl -s http://localhost:8095/api/etl/runs/<run_id> -H "Authorization: Bearer <service_jwt>"          # rows per table
+docker compose exec data-warehouse sh -c 'psql -U "$POSTGRES_USER" tamagotchi_dw'                     # analytics
+```
+
+Example queries:
+
+```sql
+-- Battles per package, and how often the challenger wins
+SELECT p.name AS package, count(*) AS battles, round(100.0 * avg((f.winner_key = f.challenger_key)::int)) AS challenger_wins_percent,
+       round(avg(f.duration_seconds)) AS avg_seconds
+FROM fact_battle f JOIN dim_package p USING (package_key)
+WHERE f.status = 'finished' GROUP BY p.name ORDER BY battles DESC;
+
+-- Global currency created and spent per day and reason
+SELECT d.full_date, c.reason, count(*) AS changes, sum(c.amount) AS global_currency
+FROM fact_currency_change c JOIN dim_date d USING (date_key)
+WHERE c.currency = 'global' GROUP BY d.full_date, c.reason ORDER BY d.full_date, c.reason;
+
+-- Raid damage ranking inside each guild
+SELECT g.name AS guild, u.username, sum(r.damage_dealt) AS damage,
+       rank() OVER (PARTITION BY g.guild_key ORDER BY sum(r.damage_dealt) DESC) AS place
+FROM fact_raid_damage r JOIN dim_guild g USING (guild_key) JOIN dim_user u USING (user_key)
+GROUP BY g.guild_key, g.name, u.username ORDER BY g.name, place;
+```
+
+### Battle settlement: saga (Grade 9)
+
+Step 3 (Filip). Since Battle 5.0.0 a finished battle is settled by **one saga on the Message Broker's coordinator**:
+`POST http://message-broker:8070/api/transactions?wait=6` with Battle's service JWT, `tx_id = settle-{battle_id}`. The
+broker runs the steps in order and, when one fails, the compensations of the completed ones, newest first. Every step
+and every compensation has its own `event_id`.
+
+| # | Step | Compensation |
+| --- | --- | --- |
+| 1 | Battle `POST /api/battles/{id}/settlement` (`battle-{id}-settle`): the battle becomes `finished` | `POST .../settlement/cancel` (`battle-{id}-settle-cancel`) |
+| 2 | User Management `POST /api/users/{winner}/currency` +120 (`battle-{id}-reward`) | −120 (`battle-{id}-reward-undo`) |
+| 3 | User Management `POST /api/users/{loser}/currency` −60 (`battle-{id}-penalty`); a **409 Insufficient global currency** fails the step | +60 (`battle-{id}-penalty-undo`) |
+| 4–7 | Tamagotchi `POST /api/tamagotchis/{id}/xp`: winner 60 / 40, loser 24 / 16 (`battle-{id}-xp-winner-primary` ...) | the negative amount (`...-undo`) |
+| 8 | Tamagotchi `POST /api/tamagotchis/{loser_primary}/transfer` (the capture, last) | the transfer back with `make_primary: true` |
+
+This replaces the separate currency and XP calls. `settlement_status` follows the saga (`completed`, `compensated`,
+`failed`, `running`); a saga still running after the wait is followed by Battle's poller every 5 s. The ETL reads the
+currency reasons from the new event ids (`-reward`, `-penalty`, `-undo`).
+
+**Trigger it** (Postman or curl; through the gateway with the two players' JWTs): create a battle, accept it, then
+`POST /api/battles/{id}/forfeit` as one player.
+- **Completed:** both players have currency (the loser at least 60). The forfeit answers 200 with
+  `settlement_status: completed`; `GET http://localhost:8070/api/transactions/settle-{id}` (service JWT) shows the 8
+  completed steps.
+- **Compensated on a 409:** the loser has less than 60. Step 3 is rejected with 409, steps 2 and 1 are undone; the
+  forfeit answers 409 `compensated`, and the winner's balance is unchanged.
+- **Compensated at the XP step:** `docker compose stop tamagotchi-service` after accepting the battle. Step 4 fails
+  after its 5 attempts (about 15 s), and steps 3, 2 and 1 are undone. The forfeit answers 200 or 202 `running`, and
+  `GET /api/battles/{id}` shows `compensated` once the poller has seen it.
+
+**Proof**: [postman/lab5-saga-e2e.md](./postman/lab5-saga-e2e.md), the three cases above run on the released images
+(broker 1.4.0), with the broker's saga log. PRs: [User Management #20](https://github.com/filipel2004/user-management-service/pull/20),
+[Battle #21](https://github.com/filipel2004/battle-service/pull/21) and [#23](https://github.com/filipel2004/battle-service/pull/23).
+
+`max_prepared_transactions` is back to its default (0) on `postgres-0..2`. Upgrading a stack that ran the 2PC version:
+`SELECT gid FROM pg_prepared_xacts` on the primary must be empty (resolve any row with `COMMIT PREPARED` or
+`ROLLBACK PREPARED`; Battle and User Management also log them at startup), then `docker compose up -d` recreates the
+three nodes together.
+
+### Battle settlement: two-phase commit (Grade 8)
+
+Step 3 (Filip), first round, **replaced by the saga above**; kept as the Grade 8 record (release 4.1.0, tag
+`lab5-2pc`). When a battle ended, Battle Service settled it as a **two-phase commit** across two databases: `battle`
+(the settlement record: the battle becomes `finished`, plus a `battle_settlements` row) and `user_management` (the
+winner's +120). `tx_id = settle-{battle_id}`.
+
+1. Battle prepares its own part: `BEGIN` ... `PREPARE TRANSACTION 'settle-{id}:battle-service'`.
+2. It asks User Management to prepare (`POST /api/tx/{tx_id}/prepare` through the broker), which ends with
+   `PREPARE TRANSACTION 'settle-{id}:user-management-service'`. 200 is a yes vote; 409, 404 or no answer is a no.
+3. Battle writes the decision (`commit` only if both voted yes) to `tx_decisions`, committed on its own.
+4. `COMMIT PREPARED` / `ROLLBACK PREPARED` on both sides (`/api/tx/{tx_id}/commit|abort` for User Management).
+5. A recovery loop finishes every pending decision at startup and every 30 s, and presumes abort for a prepared
+   transaction without a decision. The loser's penalty, the XP and the capture stay separate idempotent calls after the
+   commit (this round).
+
+Every node had `max_prepared_transactions=64`; a prepared transaction is replicated, so it survives a failover. The
+currency change still writes `IdempotencyRecords` with `event_id battle:{battle_id}:winner`, so the ETL is unchanged.
+
+**Proof** ([postman/lab5-2pc-e2e.md](./postman/lab5-2pc-e2e.md): requests, answers and both services' logs of a commit,
+an abort, and a prepared transaction committed on the new primary after `docker compose stop` of the old one):
+
+| | User Management | Battle |
+| --- | --- | --- |
+| PRs | [#17 participant](https://github.com/filipel2004/user-management-service/pull/17), [#18 token subject](https://github.com/filipel2004/user-management-service/pull/18) | [#18 coordinator](https://github.com/filipel2004/battle-service/pull/18), [#19 token subject](https://github.com/filipel2004/battle-service/pull/19) |
+| Tag | [`lab5-2pc`](https://github.com/filipel2004/user-management-service/tree/lab5-2pc) | [`lab5-2pc`](https://github.com/filipel2004/battle-service/tree/lab5-2pc) |
+| Image | `filipel2004/user-management-service:4.1.0` | `filipel2004/battle-service:4.1.0` |
+
+The CPR commit that pins these images is tagged `lab5-2pc` too. The two-phase commit was replaced by the broker saga
+(Grade 9); the tags keep the 2PC version.
+
+### Environment every service now gets
+
+| Variable | Value | Used by |
+| --- | --- | --- |
+| `CACHE_ROUTER_URL` | `http://cache-router:8090` | Gateway and all eight business services; empty disables caching. Guild, Package Registry, Monster Raid and Map use it now; other owners can adopt it (`GET`/`PUT`/`DELETE /cache/{key}`, any error = read the database) |
+| `CACHE_TTL_SECONDS`, `CACHE_TIMEOUT_MS` | per service; Guild 60 s / 300 ms, Package Registry 300 s / 300 ms, Monster Raid and Map 5 s / 300 ms by default | Guild, Package Registry, Monster Raid, Map |
+| `DATABASE_URL` | the multi-host form above | every service and Message Broker 1.4.0 |
+| `CACHE_LOOKUP_TTL_SECONDS`, `DATABASE_FAILOVER_WAIT_SECONDS` | 30 s, 5 s by default | Monster Raid, Map |
+| `BROKER_SAGA_WAIT`, `BROKER_SAGA_STEP_ATTEMPTS`, `BROKER_SAGA_COMPENSATION_ATTEMPTS` | `10s`, `5`, `10` | Message Broker 1.4.0 |
+
+Released images: Message Broker **1.4.0**, cache-router **1.0.0**, Guild and Package Registry **3.3.0**, Map and Monster Raid **2.4.0**, etl-service **1.0.0**, User Management **5.0.0** and Battle **5.0.1** (4.1.0: the two-phase-commit version, tag `lab5-2pc`).
+
